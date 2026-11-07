@@ -1,0 +1,54 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - '127.0.0.1:15672:15672'
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-demo}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-local-demo-password}
+    healthcheck:
+      test: ['CMD','rabbitmq-diagnostics','-q','ping']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+  order-api:
+    build: ./order_service
+    ports:
+      - '127.0.0.1:8000:8000'
+    environment:
+      ORDER_DB: /data/orders.db
+    volumes:
+      - orderdata:/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+  order-publisher:
+    build: ./order_service
+    command: ['python','-u','publisher.py']
+    environment:
+      ORDER_DB: /data/orders.db
+      RABBITMQ_HOST: rabbitmq
+    volumes:
+      - orderdata:/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+  notification-worker:
+    build: ./notification_service
+    environment:
+      NOTIFICATION_DB: /data/notifications.db
+      RABBITMQ_HOST: rabbitmq
+    volumes:
+      - notificationdata:/data
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  rabbitdata:
+  orderdata:
+  notificationdata:

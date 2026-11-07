@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f5f0">
+  <meta name="description" content="Thoughtful finds for slower days. Shop the MaltaShop edit.">
+  <title>MaltaShop — a little more island</title>
+  <link rel="preconnect" href="https://images.unsplash.com">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="announcement">
+    <span>Small joys, delivered island-wide</span>
+    <span class="announcement-detail">Free delivery on orders over €75</span>
+  </div>
+
+  <header class="site-header">
+    <a class="wordmark" href="#" aria-label="MaltaShop home">
+      <span class="wordmark-icon" aria-hidden="true">m<span>.</span></span>
+      <span>MALTA<span class="wordmark-light">SHOP</span></span>
+    </a>
+    <nav class="main-nav" aria-label="Main navigation">
+      <a href="#shop">Shop all</a>
+      <a href="#shop" data-nav-category="Home">Home</a>
+      <a href="#shop" data-nav-category="Tech">Tech</a>
+      <a href="#our-story">Our story</a>
+    </nav>
+    <div class="header-actions">
+      <label class="search-box">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 4 4"></path></svg>
+        <input id="searchInput" type="search" placeholder="Find your something…" aria-label="Search products">
+      </label>
+      <button class="cart-button" id="openCart" type="button" aria-label="Open shopping bag">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l1 13H4L5 8Z"></path><path d="M9 9V6a3 3 0 0 1 6 0v3"></path></svg>
+        <span class="cart-label">Bag</span>
+        <span class="cart-count" id="cartCount" aria-live="polite">0</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="heroTitle">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="eyebrow-dot"></span> THE GOOD THINGS EDIT</p>
+        <h1 id="heroTitle">A little more<br><em>island.</em></h1>
+        <p class="hero-description">Thoughtful objects, everyday favourites, and the kind of things you’ll want to keep close.</p>
+        <a class="button button-dark" href="#shop">Find your something <span aria-hidden="true">↗</span></a>
+        <div class="hero-note"><span class="sun-mark" aria-hidden="true">✳</span> Curated with a little sunshine in mind</div>
+      </div>
+      <div class="hero-art">
+        <div class="hero-sun" aria-hidden="true"></div>
+        <div class="hero-orbit hero-orbit-one" aria-hidden="true"></div>
+        <div class="hero-orbit hero-orbit-two" aria-hidden="true"></div>
+        <div class="hero-image-frame">
+          <img src="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&amp;fit=crop&amp;w=1000&amp;q=85" alt="Warm-toned headphones from the everyday essentials collection">
+        </div>
+        <div class="hero-sticker"><span>GOOD<br>THINGS</span><span class="sticker-star" aria-hidden="true">✳</span></div>
+        <div class="hero-floating-note hero-note-left"><span aria-hidden="true">✳</span><span>Picked<br>with care</span></div>
+        <div class="hero-floating-note hero-note-right"><span class="floating-note-icon" aria-hidden="true">↗</span><span>Island-wide<br>delivery</span></div>
+        <div class="hero-caption"><span>THE EVERYDAY ESSENTIALS</span><span>01 / 06</span></div>
+      </div>
+      <div class="hero-index" aria-hidden="true">VALLETTA · 35°53' N</div>
+    </section>
+
+    <section class="benefits" aria-label="Shop benefits">
+      <div><span class="benefit-icon" aria-hidden="true">↗</span><span>Good things, picked by hand</span></div>
+      <div><span class="benefit-icon" aria-hidden="true">◎</span><span>Delivery across the islands</span></div>
+      <div><span class="benefit-icon" aria-hidden="true">♡</span><span>Little details matter</span></div>
+    </section>
+
+    <section class="shop-section" id="shop" aria-labelledby="shopTitle">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">A FEW OF OUR FAVOURITES</p>
+          <h2 id="shopTitle">Good things, <em>right this way.</em></h2>
+        </div>
+        <span class="product-total" id="productTotal"></span>
+      </div>
+      <div class="shop-toolbar">
+        <div class="category-filters" role="group" aria-label="Filter products by category">
+          <button class="filter-chip is-active" type="button" data-category="All">Everything</button>
+          <button class="filter-chip" type="button" data-category="Home">Home</button>
+          <button class="filter-chip" type="button" data-category="Tech">Tech</button>
+          <button class="filter-chip" type="button" data-category="Wear">Wear</button>
+        </div>
+        <div class="shop-controls">
+          <button class="filter-chip favorites-toggle" id="favoritesOnly" type="button" aria-pressed="false">♡ Saved <span id="favoriteCount">0</span></button>
+          <label class="price-filter" for="priceRange">
+            <span>Up to <output id="priceValue" for="priceRange">€150</output></span>
+            <input id="priceRange" type="range" min="32" max="150" step="1" value="150" aria-label="Maximum product price">
+          </label>
+          <label class="sort-control">Sort by
+            <select id="sortSelect" aria-label="Sort products">
+              <option value="featured">Featured</option>
+              <option value="price-low">Price: low to high</option>
+              <option value="price-high">Price: high to low</option>
+              <option value="name">Name</option>
+              <option value="newest">Newest first</option>
+            </select>
+          </label>
+          <div class="view-controls" role="group" aria-label="Product layout">
+            <button class="view-button is-active" id="gridView" type="button" aria-label="Grid view" aria-pressed="true"><span aria-hidden="true">▦</span></button>
+            <button class="view-button" id="listView" type="button" aria-label="List view" aria-pressed="false"><span aria-hidden="true">☰</span></button>
+          </div>
+          <button class="motion-toggle" id="motionToggle" type="button" aria-pressed="true"><span class="motion-toggle-dot" aria-hidden="true"></span><span>3D on</span></button>
+        </div>
+      </div>
+      <div class="product-grid" id="productGrid" aria-live="polite"></div>
+      <div class="empty-search" id="emptySearch" hidden>
+        <span aria-hidden="true">⌕</span>
+        <h3>Nothing on this shelf just yet.</h3>
+        <p>Try another search or reset your filters to browse everything.</p>
+        <button class="button button-outline" id="clearSearch" type="button">Reset filters</button>
+      </div>
+    </section>
+
+    <section class="story-banner" id="our-story">
+      <div class="story-symbol" aria-hidden="true">✳</div>
+      <div>
+        <p class="eyebrow">A NOTE FROM THE ISLANDS</p>
+        <h2>Less rush.<br><em>More good stuff.</em></h2>
+      </div>
+      <p class="story-copy">MaltaShop is a little collection of useful, lovely things for the everyday. Picked with care, packed with a smile, and sent your way.</p>
+      <a href="#shop" class="text-link">Get to know the edit <span aria-hidden="true">↗</span></a>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <a class="wordmark footer-wordmark" href="#" aria-label="MaltaShop home">
+      <span class="wordmark-icon" aria-hidden="true">m<span>.</span></span>
+      <span>MALTA<span class="wordmark-light">SHOP</span></span>
+    </a>
+    <p>A little more island, in every day.</p>
+    <div class="footer-links"><a href="#shop">Shop</a><button type="button" id="openTrack">Track an order</button></div>
+    <span class="copyright">© 2026 MaltaShop · Made for the everyday</span>
+  </footer>
+
+  <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+  <aside class="cart-drawer" id="cartDrawer" aria-labelledby="cartTitle" aria-hidden="true">
+    <div class="drawer-header">
+      <div><p class="eyebrow">YOUR LITTLE FINDS</p><h2 id="cartTitle">Your bag <span id="drawerCount"></span></h2></div>
+      <button class="icon-button" id="closeCart" type="button" aria-label="Close shopping bag">×</button>
+    </div>
+    <div class="cart-items" id="cartItems"></div>
+    <div class="cart-empty" id="cartEmpty"><span aria-hidden="true">♡</span><h3>Your bag is taking a breather.</h3><p>There are plenty of good things to put in it.</p><button class="button button-outline" id="continueShopping" type="button">Keep browsing</button></div>
+    <div class="cart-summary" id="cartSummary">
+      <div class="subtotal-row"><span>Subtotal</span><strong id="cartSubtotal">€0.00</strong></div>
+      <p>Delivery is calculated at checkout. Free delivery over €75.</p>
+      <button class="button button-dark checkout-button" id="startCheckout" type="button">On to checkout <span aria-hidden="true">→</span></button>
+      <span class="secure-note"><span aria-hidden="true">✳</span> No payment is collected in this demo</span>
+    </div>
+  </aside>
+
+  <dialog class="modal" id="checkoutDialog" aria-labelledby="checkoutTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close checkout">×</button>
+    <div class="modal-content" id="checkoutContent">
+      <p class="eyebrow">ALMOST YOURS</p>
+      <h2 id="checkoutTitle">A few details,<br><em>then it’s a good day.</em></h2>
+      <p class="modal-intro">A few final details, then your demo order is ready. Choose a payment option to preview checkout.</p>
+      <div class="checkout-review" id="checkoutReview"></div>
+      <form id="checkoutForm">
+        <fieldset class="payment-methods">
+          <legend class="payment-legend">Choose a payment method <span>DEMO PREVIEW</span></legend>
+          <label class="payment-option">
+            <input type="radio" name="paymentMethod" value="card">
+            <span class="payment-option-icon card-icon" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span class="payment-option-copy"><strong>Credit or debit card</strong><small>Visa · Mastercard · no card details needed</small></span>
+            <span class="payment-brands" aria-hidden="true">VISA<br><b>●●</b></span>
+            <span class="payment-radio" aria-hidden="true"></span>
+          </label>
+          <label class="payment-option">
+            <input type="radio" name="paymentMethod" value="paypal">
+            <span class="payment-option-icon paypal-icon" aria-hidden="true">P</span>
+            <span class="payment-option-copy"><strong>PayPal</strong><small>Continue with a demo selection</small></span>
+            <span class="payment-brand-word paypal-word" aria-hidden="true">PayPal</span>
+            <span class="payment-radio" aria-hidden="true"></span>
+          </label>
+          <label class="payment-option is-selected">
+            <input type="radio" name="paymentMethod" value="cash" checked>
+            <span class="payment-option-icon cash-icon" aria-hidden="true">€</span>
+            <span class="payment-option-copy"><strong>Cash on delivery</strong><small>Preview pay-on-arrival checkout</small></span>
+            <span class="payment-brand-word" aria-hidden="true">ON ARRIVAL</span>
+            <span class="payment-radio" aria-hidden="true"></span>
+          </label>
+          <p class="payment-demo-note"><span aria-hidden="true">ⓘ</span> Demo only — no payment is processed, and no card or account details are collected.</p>
+        </fieldset>
+        <label class="form-label" for="customerEmail">Email address</label>
+        <input class="form-input" id="customerEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" maxlength="100" required>
+        <p class="privacy-note">Your email is used as the demo customer ID and stored with your order.</p>
+        <p class="form-error" id="checkoutError" role="alert" hidden></p>
+        <button class="button button-dark modal-submit" id="placeOrder" type="submit">Place demo order <span aria-hidden="true">→</span></button>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog class="modal product-dialog" id="productDialog" aria-labelledby="productDialogTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close product details">×</button>
+    <div class="product-dialog-layout">
+      <div class="product-dialog-image" id="productDialogImage">
+        <span id="productDialogEmoji" aria-hidden="true"></span>
+        <img id="productDialogImg" alt="">
+      </div>
+      <div class="product-dialog-copy">
+        <p class="eyebrow" id="productDialogCategory"></p>
+        <h2 id="productDialogTitle"></h2>
+        <p class="product-dialog-price" id="productDialogPrice"></p>
+        <p class="product-dialog-description" id="productDialogDescription"></p>
+        <div class="product-dialog-actions">
+          <button class="button button-dark" id="productDialogAdd" type="button">Add to bag <span aria-hidden="true">→</span></button>
+          <button class="button button-outline" id="productDialogFavorite" type="button" aria-pressed="false">♡ Save</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="modal track-modal" id="trackDialog" aria-labelledby="trackTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close order tracking">×</button>
+    <div class="modal-content">
+      <p class="eyebrow">A LITTLE UPDATE</p>
+      <h2 id="trackTitle">Find your<br><em>order.</em></h2>
+      <p class="modal-intro">Enter an order ID from your confirmation to check its latest status.</p>
+      <form id="trackForm">
+        <label class="form-label" for="trackOrderId">Order ID</label>
+        <input class="form-input" id="trackOrderId" name="orderId" type="text" autocomplete="off" placeholder="Paste your order ID" required>
+        <p class="form-error" id="trackError" role="alert" hidden></p>
+        <div class="track-result" id="trackResult" hidden></div>
+        <button class="button button-dark modal-submit" type="submit">Look up order <span aria-hidden="true">→</span></button>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog class="modal confirmation-modal" id="confirmationDialog" aria-labelledby="confirmationTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close order confirmation">×</button>
+    <div class="confirmation-mark" aria-hidden="true">✓</div>
+    <div class="modal-content">
+      <p class="eyebrow">THAT’S A GOOD CHOICE</p>
+      <h2 id="confirmationTitle">Order placed.<br><em>Sunshine pending.</em></h2>
+      <p class="modal-intro">Your order is accepted for processing. No payment has been taken.</p>
+      <div class="confirmation-orders" id="confirmationOrders"></div>
+      <button class="button button-dark modal-submit" id="trackNewOrder" type="button">Track an order <span aria-hidden="true">→</span></button>
+      <button class="text-button" type="button" data-close-dialog>Back to the good things</button>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

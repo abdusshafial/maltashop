@@ -1,0 +1,2 @@
+-r ../order_service/requirements.txt
+a2wsgi==1.10.10
