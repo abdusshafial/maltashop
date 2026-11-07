@@ -1,6 +1,8 @@
 import os
 import sys
+import threading
 from pathlib import Path
+from typing import Callable, Iterable
 
 PROJECT_ROOT = Path(
     os.environ.get("MALTASHOP_ROOT", Path(__file__).resolve().parent.parent)
@@ -20,4 +22,14 @@ os.environ.setdefault("RABBITMQ_HOST", "localhost")
 from a2wsgi import ASGIMiddleware
 from order_service.app import app
 
-application = ASGIMiddleware(app)
+_asgi_application = None
+_asgi_application_lock = threading.Lock()
+
+
+def application(environ: dict, start_response: Callable) -> Iterable[bytes]:
+    global _asgi_application
+    if _asgi_application is None:
+        with _asgi_application_lock:
+            if _asgi_application is None:
+                _asgi_application = ASGIMiddleware(app)
+    return _asgi_application(environ, start_response)

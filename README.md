@@ -58,7 +58,7 @@ In the PythonAnywhere **Web** tab:
 3. Open the WSGI configuration file and replace its contents with the contents of `pythonanywhere/wsgi.py`. The file locates the project under `~/maltashop` when copied into PythonAnywhere's WSGI configuration.
 4. Reload the web app.
 
-The WSGI file bridges PythonAnywhere's WSGI interface to the FastAPI ASGI app. Static files are served by FastAPI at `/static`; no separate static mapping is required.
+The WSGI file bridges PythonAnywhere's WSGI interface to the FastAPI ASGI app and initializes its event loop lazily inside the uWSGI worker. Static files are served by FastAPI at `/static`; no separate static mapping is required.
 
 ### Demo order processing
 
