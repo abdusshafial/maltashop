@@ -42,7 +42,7 @@ In a PythonAnywhere Bash console, replace `YOUR_USERNAME` with your PythonAnywhe
 cd ~
 git clone https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPOSITORY.git maltashop
 cd ~/maltashop
-mkvirtualenv --python=/usr/bin/python3.11 maltashop-venv
+mkvirtualenv --python=/usr/local/bin/python3.11 maltashop-venv
 workon maltashop-venv
 pip install -r pythonanywhere/requirements.txt
 ```
