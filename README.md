@@ -55,7 +55,7 @@ In the PythonAnywhere **Web** tab:
 
 1. Create a **Manual configuration** web app using Python 3.11.
 2. Set the virtualenv to `/home/YOUR_USERNAME/.virtualenvs/maltashop-venv`.
-3. Open the WSGI configuration file and replace its contents with the contents of `pythonanywhere/wsgi.py`, updating `YOUR_USERNAME`.
+3. Open the WSGI configuration file and replace its contents with the contents of `pythonanywhere/wsgi.py`. The file locates the project under `~/maltashop` when copied into PythonAnywhere's WSGI configuration.
 4. Reload the web app.
 
 The WSGI file bridges PythonAnywhere's WSGI interface to the FastAPI ASGI app. Static files are served by FastAPI at `/static`; no separate static mapping is required.
