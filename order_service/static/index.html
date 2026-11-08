@@ -3,17 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f7f5f0">
-  <meta name="description" content="Thoughtful finds for slower days. Shop the MaltaShop edit.">
-  <title>MaltaShop — a little more island</title>
+  <meta name="theme-color" content="#faf7f2">
+  <meta name="description" content="Shop thoughtful finds for home, tech and everyday wear. Delivered across Malta and Gozo in an estimated 2–5 working days.">
+  <title>MaltaShop — Good things, delivered</title>
   <link rel="preconnect" href="https://images.unsplash.com">
   <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/product-images.js" defer></script>
+  <script src="/static/catalog.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <div class="announcement">
-    <span>Small joys, delivered island-wide</span>
-    <span class="announcement-detail">Free delivery on orders over €75</span>
+    <span>Malta &amp; Gozo delivery</span>
+    <span class="announcement-detail">Estimated delivery in 2–5 working days</span>
   </div>
 
   <header class="site-header">
@@ -25,9 +27,12 @@
       <a href="#shop">Shop all</a>
       <a href="#shop" data-nav-category="Home">Home</a>
       <a href="#shop" data-nav-category="Tech">Tech</a>
+      <a href="#shop" data-nav-category="Wear">Wear</a>
+      <a href="#delivery">Delivery</a>
       <a href="#our-story">Our story</a>
     </nav>
     <div class="header-actions">
+      <button class="my-orders-button" id="openMyOrders" type="button">My orders</button>
       <label class="search-box">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 4 4"></path></svg>
         <input id="searchInput" type="search" placeholder="Find your something…" aria-label="Search products">
@@ -45,9 +50,9 @@
       <div class="hero-copy">
         <p class="eyebrow"><span class="eyebrow-dot"></span> THE GOOD THINGS EDIT</p>
         <h1 id="heroTitle">A little more<br><em>island.</em></h1>
-        <p class="hero-description">Thoughtful objects, everyday favourites, and the kind of things you’ll want to keep close.</p>
+        <p class="hero-description">Shop useful finds for home, tech, and everyday wear. Every order includes clear delivery details and a 2–5 working-day estimate across Malta and Gozo.</p>
         <a class="button button-dark" href="#shop">Find your something <span aria-hidden="true">↗</span></a>
-        <div class="hero-note"><span class="sun-mark" aria-hidden="true">✳</span> Curated with a little sunshine in mind</div>
+        <div class="hero-note"><span class="sun-mark" aria-hidden="true">✳</span> Easy browsing · clear order tracking</div>
       </div>
       <div class="hero-art">
         <div class="hero-sun" aria-hidden="true"></div>
@@ -65,15 +70,25 @@
     </section>
 
     <section class="benefits" aria-label="Shop benefits">
-      <div><span class="benefit-icon" aria-hidden="true">↗</span><span>Good things, picked by hand</span></div>
-      <div><span class="benefit-icon" aria-hidden="true">◎</span><span>Delivery across the islands</span></div>
-      <div><span class="benefit-icon" aria-hidden="true">♡</span><span>Little details matter</span></div>
+      <div><span class="benefit-icon" aria-hidden="true">↗</span><span>Home, tech &amp; everyday wear</span></div>
+      <div><span class="benefit-icon" aria-hidden="true">◎</span><span>2–5 working-day delivery estimate</span></div>
+      <div><span class="benefit-icon" aria-hidden="true">♡</span><span>Order details saved for tracking</span></div>
+    </section>
+
+    <section class="delivery-banner" id="delivery" aria-labelledby="deliveryTitle">
+      <div class="delivery-icon" aria-hidden="true">◎</div>
+      <div>
+        <p class="eyebrow">MALTA &amp; GOZO</p>
+        <h2 id="deliveryTitle">Delivery, <em>made clear.</em></h2>
+        <p>Estimated minimum: <strong>2 working days</strong> · maximum: <strong>5 working days</strong> after your order is placed. Weekends are not counted; actual arrival can vary.</p>
+      </div>
+      <button class="button button-outline" id="deliveryTrack" type="button">Track an order <span aria-hidden="true">→</span></button>
     </section>
 
     <section class="shop-section" id="shop" aria-labelledby="shopTitle">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">A FEW OF OUR FAVOURITES</p>
+          <p class="eyebrow">THE MALTA SHOP COLLECTION</p>
           <h2 id="shopTitle">Good things, <em>right this way.</em></h2>
         </div>
         <span class="product-total" id="productTotal"></span>
@@ -122,8 +137,8 @@
         <p class="eyebrow">A NOTE FROM THE ISLANDS</p>
         <h2>Less rush.<br><em>More good stuff.</em></h2>
       </div>
-      <p class="story-copy">MaltaShop is a little collection of useful, lovely things for the everyday. Picked with care, packed with a smile, and sent your way.</p>
-      <a href="#shop" class="text-link">Get to know the edit <span aria-hidden="true">↗</span></a>
+      <p class="story-copy">Browse by category, check the product details, add your favourites to the bag, and enter your delivery details at checkout. Each confirmed order is saved in the shop database and comes with an order ID you can use to check its status.</p>
+      <a href="#shop" class="text-link">Browse the collection <span aria-hidden="true">↗</span></a>
     </section>
   </main>
 
@@ -132,9 +147,10 @@
       <span class="wordmark-icon" aria-hidden="true">m<span>.</span></span>
       <span>MALTA<span class="wordmark-light">SHOP</span></span>
     </a>
-    <p>A little more island, in every day.</p>
-    <div class="footer-links"><a href="#shop">Shop</a><button type="button" id="openTrack">Track an order</button></div>
-    <span class="copyright">© 2026 MaltaShop · Made for the everyday</span>
+    <p>Thoughtful finds for home, tech and everyday wear.</p>
+    <div class="footer-links"><a href="#shop">Shop</a><a href="#delivery">Delivery details</a><button type="button" id="openMyOrdersFooter">My orders</button><button type="button" id="openComplaints">Complaints</button><button type="button" id="openTrack">Track an order</button></div>
+    <span class="copyright">© 2026 MaltaShop · Estimated island-wide delivery: 2–5 working days</span>
+    <span class="developer-credit">Developed by <strong>Abdus Shafial</strong></span>
   </footer>
 
   <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
@@ -147,18 +163,34 @@
     <div class="cart-empty" id="cartEmpty"><span aria-hidden="true">♡</span><h3>Your bag is taking a breather.</h3><p>There are plenty of good things to put in it.</p><button class="button button-outline" id="continueShopping" type="button">Keep browsing</button></div>
     <div class="cart-summary" id="cartSummary">
       <div class="subtotal-row"><span>Subtotal</span><strong id="cartSubtotal">€0.00</strong></div>
-      <p>Delivery is calculated at checkout. Free delivery over €75.</p>
+      <p>Estimated delivery: 2–5 working days across Malta and Gozo. No payment or delivery charge is collected in this demo.</p>
       <button class="button button-dark checkout-button" id="startCheckout" type="button">On to checkout <span aria-hidden="true">→</span></button>
       <span class="secure-note"><span aria-hidden="true">✳</span> No payment is collected in this demo</span>
     </div>
   </aside>
+
+  <dialog class="modal welcome-modal" id="welcomeDialog" aria-labelledby="welcomeTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close welcome message">×</button>
+    <div class="welcome-mark" aria-hidden="true">m<span>.</span></div>
+    <div class="modal-content">
+      <p class="eyebrow">WELCOME TO MALTA SHOP</p>
+      <h2 id="welcomeTitle">A little more<br><em>island.</em></h2>
+      <p class="modal-intro">Discover thoughtful finds for your home, everyday tech, and what to wear. Find something lovely, place your order, and keep up with it in My orders.</p>
+      <div class="welcome-details">
+        <span><strong>2–5 days</strong> estimated delivery</span>
+        <span><strong>Malta &amp; Gozo</strong> island-wide delivery</span>
+      </div>
+      <button class="button button-dark modal-submit" id="welcomeShopNow" type="button">Explore the collection <span aria-hidden="true">→</span></button>
+      <button class="text-button welcome-dismiss" id="welcomeNeverShow" type="button">Don’t show this again</button>
+    </div>
+  </dialog>
 
   <dialog class="modal" id="checkoutDialog" aria-labelledby="checkoutTitle">
     <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close checkout">×</button>
     <div class="modal-content" id="checkoutContent">
       <p class="eyebrow">ALMOST YOURS</p>
       <h2 id="checkoutTitle">A few details,<br><em>then it’s a good day.</em></h2>
-      <p class="modal-intro">A few final details, then your demo order is ready. Choose a payment option to preview checkout.</p>
+      <p class="modal-intro">Add your contact and delivery details. The order and these details are saved to the shop’s SQLite database. Delivery is estimated in 2–5 working days (Monday–Friday).</p>
       <div class="checkout-review" id="checkoutReview"></div>
       <form id="checkoutForm">
         <fieldset class="payment-methods">
@@ -188,7 +220,23 @@
         </fieldset>
         <label class="form-label" for="customerEmail">Email address</label>
         <input class="form-input" id="customerEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" maxlength="100" required>
-        <p class="privacy-note">Your email is used as the demo customer ID and stored with your order.</p>
+        <label class="form-label" for="customerName">Full name</label>
+        <input class="form-input" id="customerName" name="fullName" type="text" autocomplete="name" placeholder="Name for delivery" maxlength="100" required>
+        <label class="form-label" for="customerPhone">Phone number</label>
+        <input class="form-input" id="customerPhone" name="phone" type="tel" autocomplete="tel" placeholder="+356 ..." minlength="5" maxlength="30" required>
+        <label class="form-label" for="customerAddress">Street address</label>
+        <input class="form-input" id="customerAddress" name="address" type="text" autocomplete="street-address" placeholder="House number and street" minlength="5" maxlength="250" required>
+        <div class="checkout-field-row">
+          <div>
+            <label class="form-label" for="customerCity">City or town</label>
+            <input class="form-input" id="customerCity" name="city" type="text" autocomplete="address-level2" placeholder="City or town" maxlength="100" required>
+          </div>
+          <div>
+            <label class="form-label" for="customerPostalCode">Postcode</label>
+            <input class="form-input" id="customerPostalCode" name="postalCode" type="text" autocomplete="postal-code" placeholder="e.g. VLT 1000" minlength="2" maxlength="20" required>
+          </div>
+        </div>
+        <p class="privacy-note">Your contact and delivery details, items, payment preference, and delivery estimate are saved with the order in SQLite. This demo does not collect card details or process payments.</p>
         <p class="form-error" id="checkoutError" role="alert" hidden></p>
         <button class="button button-dark modal-submit" id="placeOrder" type="submit">Place demo order <span aria-hidden="true">→</span></button>
       </form>
@@ -198,15 +246,15 @@
   <dialog class="modal product-dialog" id="productDialog" aria-labelledby="productDialogTitle">
     <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close product details">×</button>
     <div class="product-dialog-layout">
-      <div class="product-dialog-image" id="productDialogImage">
-        <span id="productDialogEmoji" aria-hidden="true"></span>
-        <img id="productDialogImg" alt="">
-      </div>
+    <div class="product-dialog-image" id="productDialogImage">
+      <img id="productDialogImg" alt="">
+    </div>
       <div class="product-dialog-copy">
         <p class="eyebrow" id="productDialogCategory"></p>
         <h2 id="productDialogTitle"></h2>
         <p class="product-dialog-price" id="productDialogPrice"></p>
         <p class="product-dialog-description" id="productDialogDescription"></p>
+        <div class="product-dialog-details" id="productDialogDetails"></div>
         <div class="product-dialog-actions">
           <button class="button button-dark" id="productDialogAdd" type="button">Add to bag <span aria-hidden="true">→</span></button>
           <button class="button button-outline" id="productDialogFavorite" type="button" aria-pressed="false">♡ Save</button>
@@ -220,7 +268,7 @@
     <div class="modal-content">
       <p class="eyebrow">A LITTLE UPDATE</p>
       <h2 id="trackTitle">Find your<br><em>order.</em></h2>
-      <p class="modal-intro">Enter an order ID from your confirmation to check its latest status.</p>
+      <p class="modal-intro">Enter an order ID from your confirmation to check its status and estimated delivery window.</p>
       <form id="trackForm">
         <label class="form-label" for="trackOrderId">Order ID</label>
         <input class="form-input" id="trackOrderId" name="orderId" type="text" autocomplete="off" placeholder="Paste your order ID" required>
@@ -231,14 +279,71 @@
     </div>
   </dialog>
 
+  <dialog class="modal my-orders-modal" id="myOrdersDialog" aria-labelledby="myOrdersTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close my orders">×</button>
+    <div class="modal-content">
+      <p class="eyebrow">YOUR MALTA SHOP ORDERS</p>
+      <h2 id="myOrdersTitle">My <em>orders.</em></h2>
+      <p class="modal-intro">Enter the email address and phone number used at checkout to see your orders—no tracking ID needed. For a Malta number, either the local number or +356 format works. Orders can be cancelled within 12 hours. To report a product or delivery-person issue, choose “Report a problem” on an order.</p>
+      <form id="myOrdersForm">
+        <label class="form-label" for="myOrdersEmail">Email address</label>
+        <input class="form-input" id="myOrdersEmail" name="email" type="email" autocomplete="email" maxlength="100" required>
+        <label class="form-label" for="myOrdersPhone">Phone number</label>
+        <input class="form-input" id="myOrdersPhone" name="phone" type="tel" autocomplete="tel" minlength="5" maxlength="30" placeholder="Local number or +356 ..." required>
+        <p class="form-error" id="myOrdersError" role="alert" hidden></p>
+        <button class="button button-dark modal-submit" id="findMyOrders" type="submit">Find my orders <span aria-hidden="true">→</span></button>
+      </form>
+      <div class="my-orders-list" id="myOrdersList" aria-live="polite" hidden></div>
+    </div>
+  </dialog>
+
+  <dialog class="modal complaint-modal" id="complaintDialog" aria-labelledby="complaintTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close complaint form">×</button>
+    <div class="modal-content">
+      <p class="eyebrow">MALTASHOP SUPPORT</p>
+      <h2 id="complaintTitle">Tell us what<br><em>went wrong.</em></h2>
+      <p class="modal-intro" id="complaintOrderSummary"></p>
+      <form id="complaintForm">
+        <label class="form-label" for="complaintType">What is your complaint about?</label>
+        <select class="form-input" id="complaintType" name="complaintType" required>
+          <option value="product">A product</option>
+          <option value="delivery">The delivery person</option>
+        </select>
+        <div id="complaintProductField">
+          <label class="form-label" for="complaintProduct">Choose the product</label>
+          <select class="form-input" id="complaintProduct" name="productSku" required></select>
+        </div>
+        <label class="form-label" for="complaintMessage">Complaint details</label>
+        <textarea class="form-input complaint-message" id="complaintMessage" name="message" minlength="10" maxlength="2000" rows="5" placeholder="Please describe what happened (at least 10 characters)." required></textarea>
+        <p class="form-error" id="complaintError" role="alert" hidden></p>
+        <p class="complaint-success" id="complaintSuccess" role="status" hidden></p>
+        <button class="button button-dark modal-submit" id="submitComplaint" type="submit">Send complaint <span aria-hidden="true">→</span></button>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog class="modal cancel-order-modal" id="cancelOrderDialog" aria-labelledby="cancelOrderTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close cancellation confirmation">×</button>
+    <div class="modal-content">
+      <p class="eyebrow">ORDER CANCELLATION</p>
+      <h2 id="cancelOrderTitle">Cancel this <em>order?</em></h2>
+      <p class="modal-intro" id="cancelOrderDescription"></p>
+      <p class="form-error" id="cancelOrderError" role="alert" hidden></p>
+      <button class="button button-dark modal-submit" id="confirmCancelOrder" type="button">Yes, cancel this order</button>
+      <button class="text-button" type="button" data-close-dialog>Keep my order</button>
+    </div>
+  </dialog>
+
   <dialog class="modal confirmation-modal" id="confirmationDialog" aria-labelledby="confirmationTitle">
     <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close order confirmation">×</button>
     <div class="confirmation-mark" aria-hidden="true">✓</div>
     <div class="modal-content">
       <p class="eyebrow">THAT’S A GOOD CHOICE</p>
       <h2 id="confirmationTitle">Order placed.<br><em>Sunshine pending.</em></h2>
-      <p class="modal-intro">Your order is accepted for processing. No payment has been taken.</p>
+      <p class="modal-intro">Your order and delivery details are saved. No payment has been taken.</p>
+      <div class="confirmation-details" id="confirmationDetails"></div>
       <div class="confirmation-orders" id="confirmationOrders"></div>
+      <button class="button button-outline modal-submit" id="viewMyOrdersAfterCheckout" type="button">View my orders</button>
       <button class="button button-dark modal-submit" id="trackNewOrder" type="button">Track an order <span aria-hidden="true">→</span></button>
       <button class="text-button" type="button" data-close-dialog>Back to the good things</button>
     </div>

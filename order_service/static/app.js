@@ -1,4 +1,4 @@
-const products = [
+const featuredProducts = [
   { sku: "HEADPHONES-01", name: "Everyday headphones", category: "Tech", price: 64, tag: "ISLAND FAVOURITE", emoji: "🎧", bg: "#d8d0bb", image: "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=700&q=80", description: "Settle into your own soundtrack with an everyday essential, chosen for unhurried moments at home or on the go." },
   { sku: "VASE-01", name: "Sorrento ceramic vase", category: "Home", price: 32, tag: "MADE TO KEEP", emoji: "🏺", bg: "#e7d2bd", image: "https://images.unsplash.com/photo-1578500494198-246f612d3b3d?auto=format&fit=crop&w=700&q=80", description: "A quietly beautiful accent for a favourite corner, whether it holds fresh stems or simply catches the afternoon light." },
   { sku: "WATCH-01", name: "Sunday wristwatch", category: "Wear", price: 89, tag: "A GOOD GIFT", emoji: "⌚", bg: "#e5d7c6", image: "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=700&q=80", description: "A simple finishing touch for everyday plans and slow Sundays alike." },
@@ -9,6 +9,7 @@ const products = [
   { sku: "LAMP-01", name: "Soft-light table lamp", category: "Home", price: 58, tag: "A LITTLE GLOW", emoji: "💡", bg: "#d8d2bb", image: "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=700&q=80", description: "Add a softer note to a bedside table, reading nook, or favourite corner." }
 ];
 
+const products = [...featuredProducts, ...additionalProducts];
 const money = new Intl.NumberFormat("en-MT", { style: "currency", currency: "EUR" });
 const productBySku = new Map(products.map((product) => [product.sku, product]));
 const productGrid = document.querySelector("#productGrid");
@@ -31,6 +32,9 @@ let motionEnabled = !window.matchMedia("(prefers-reduced-motion: reduce)").match
 let activeProductSku = null;
 let toastTimer;
 let lastOrderIds = [];
+let lastCustomerDetails = null;
+let activeMyOrdersCredentials = null;
+let pendingCancellation = null;
 
 function loadCart() {
   try {
@@ -98,7 +102,6 @@ function renderProducts() {
   productGrid.innerHTML = visible.map((product) => `
     <article class="product-card">
       <div class="product-visual" style="--product-bg:${product.bg}">
-        <span class="product-emoji" aria-hidden="true">${product.emoji}</span>
         <img src="${product.image}" alt="" loading="lazy">
         <span class="product-tag">${product.tag}</span>
         <button class="favorite-button${favorites.includes(product.sku) ? " is-saved" : ""}" type="button" data-favorite="${product.sku}" aria-label="${favorites.includes(product.sku) ? "Remove" : "Save"} ${product.name} ${favorites.includes(product.sku) ? "from" : "to"} favourites" aria-pressed="${favorites.includes(product.sku)}">${favorites.includes(product.sku) ? "♥" : "♡"}</button>
@@ -106,7 +109,7 @@ function renderProducts() {
         <button class="quick-add" type="button" data-add="${product.sku}" aria-label="Add ${product.name} to bag">+</button>
       </div>
       <div class="product-meta">
-        <div><h3>${product.name}</h3><p class="product-category">${product.category} · MaltaShop edit</p></div>
+        <div><h3>${product.name}</h3><p class="product-category">${product.category} · ${product.sku}</p><p class="product-delivery">Estimated delivery: 2–5 working days</p></div>
         <span class="product-price">${money.format(product.price)}</span>
       </div>
     </article>
@@ -144,11 +147,16 @@ function openProductDialog(sku) {
   image.alt = product.name;
   image.onerror = () => { image.hidden = true; };
   document.querySelector("#productDialogImage").style.setProperty("--product-bg", product.bg);
-  document.querySelector("#productDialogEmoji").textContent = product.emoji;
   document.querySelector("#productDialogCategory").textContent = `${product.category} · ${product.tag}`;
   document.querySelector("#productDialogTitle").textContent = product.name;
   document.querySelector("#productDialogPrice").textContent = money.format(product.price);
   document.querySelector("#productDialogDescription").textContent = product.description;
+  document.querySelector("#productDialogDetails").innerHTML = `
+    <div><span>Product code</span><strong>${product.sku}</strong></div>
+    <div><span>Category</span><strong>${product.category}</strong></div>
+    <div><span>Delivery estimate</span><strong>2–5 working days</strong></div>
+    <p>Estimated after checkout, Monday to Friday, across Malta and Gozo. Actual delivery time may vary.</p>
+  `;
   const favoriteButton = document.querySelector("#productDialogFavorite");
   const isSaved = favorites.includes(sku);
   favoriteButton.textContent = isSaved ? "♥ Saved" : "♡ Save";
@@ -177,7 +185,6 @@ function renderCart() {
     return `
       <article class="cart-line">
         <div class="cart-line-image" style="--product-bg:${product.bg}">
-          <span aria-hidden="true">${product.emoji}</span>
           <img src="${product.image}" alt="" loading="lazy">
         </div>
         <div class="cart-line-main">
@@ -260,6 +267,20 @@ function openTrackDialog(orderId = "") {
   if (!orderId) input.focus();
 }
 
+function formatDeliveryRange(order) {
+  const minimumDays = order.delivery_min_days || 2;
+  const maximumDays = order.delivery_max_days || 5;
+  if (!order.earliest_delivery || !order.latest_delivery) {
+    return `${minimumDays}–${maximumDays} working days`;
+  }
+  const dateOptions = { day: "numeric", month: "short", year: "numeric" };
+  const earliest = new Intl.DateTimeFormat("en-MT", dateOptions)
+    .format(new Date(`${order.earliest_delivery}T12:00:00`));
+  const latest = new Intl.DateTimeFormat("en-MT", dateOptions)
+    .format(new Date(`${order.latest_delivery}T12:00:00`));
+  return `${minimumDays}–${maximumDays} working days · ${earliest}–${latest}`;
+}
+
 async function lookupOrder(orderId) {
   const errorBox = document.querySelector("#trackError");
   const result = document.querySelector("#trackResult");
@@ -280,7 +301,11 @@ async function lookupOrder(orderId) {
     item.innerHTML = "<strong>Item</strong>";
     const itemValue = document.createElement("p");
     itemValue.textContent = `${productBySku.get(order.sku)?.name || order.sku} × ${order.quantity}`;
-    result.replaceChildren(heading, id, idValue, item, itemValue);
+    const delivery = document.createElement("p");
+    delivery.innerHTML = "<strong>Delivery estimate</strong>";
+    const deliveryValue = document.createElement("p");
+    deliveryValue.textContent = formatDeliveryRange(order);
+    result.replaceChildren(heading, id, idValue, item, itemValue, delivery, deliveryValue);
     result.hidden = false;
   } catch (error) {
     errorBox.textContent = error.message || "We couldn’t look up that order. Please try again.";
@@ -288,8 +313,23 @@ async function lookupOrder(orderId) {
   }
 }
 
-function renderConfirmation(orders) {
+function renderConfirmation(orders, details) {
+  lastCustomerDetails = details;
   lastOrderIds = orders.map((order) => order.order_id);
+  const paymentLabels = { card: "Credit or debit card (demo)", paypal: "PayPal (demo)", cash: "Cash on delivery (demo)" };
+  const savedDetails = document.querySelector("#confirmationDetails");
+  savedDetails.replaceChildren();
+  [
+    `Delivery to: ${details.full_name}`,
+    `${details.address}, ${details.city}, ${details.postal_code}`,
+    `Contact: ${details.email} · ${details.phone}`,
+    `Payment preference: ${paymentLabels[details.payment_method] || details.payment_method}`,
+    "Estimated delivery: 2–5 working days (Monday–Friday)"
+  ].forEach((text) => {
+    const line = document.createElement("p");
+    line.textContent = text;
+    savedDetails.append(line);
+  });
   const container = document.querySelector("#confirmationOrders");
   container.replaceChildren(...orders.map((order) => {
     const wrapper = document.createElement("div");
@@ -299,10 +339,270 @@ function renderConfirmation(orders) {
     paragraph.textContent = product ? `${product.name} × ${order.quantity} · ${order.status}` : `Order · ${order.status}`;
     const code = document.createElement("code");
     code.textContent = order.order_id;
-    wrapper.append(paragraph, code);
+    const delivery = document.createElement("p");
+    delivery.textContent = `Estimated delivery: ${formatDeliveryRange(order)}`;
+    wrapper.append(paragraph, code, delivery);
     return wrapper;
   }));
   document.querySelector("#confirmationDialog").showModal();
+}
+
+function formatOrderDate(value) {
+  if (!value) return "Date unavailable";
+  return new Intl.DateTimeFormat("en-MT", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
+
+function renderMyOrders(orders) {
+  const list = document.querySelector("#myOrdersList");
+  list.replaceChildren();
+  if (!orders.length) {
+    const empty = document.createElement("p");
+    empty.className = "my-orders-empty";
+    empty.textContent = "No orders were found for that email and phone number.";
+    list.append(empty);
+    list.hidden = false;
+    return;
+  }
+
+  orders.forEach((order) => {
+    const card = document.createElement("article");
+    card.className = "my-order-card";
+    const header = document.createElement("div");
+    header.className = "my-order-header";
+    const title = document.createElement("h3");
+    title.textContent = `Order placed ${formatOrderDate(order.created_at)}`;
+    const status = document.createElement("span");
+    status.className = `my-order-status${order.status === "CANCELLED" ? " is-cancelled" : ""}`;
+    status.textContent = order.status === "CANCELLED" ? "Cancelled" : order.status === "PENDING" ? "Confirmed" : order.status;
+    header.append(title, status);
+
+    const items = document.createElement("ul");
+    items.className = "my-order-items";
+    order.items.forEach((item) => {
+      const line = document.createElement("li");
+      const product = productBySku.get(item.sku);
+      line.textContent = `${product?.name || item.sku} × ${item.quantity}`;
+      items.append(line);
+    });
+
+    const delivery = document.createElement("p");
+    delivery.className = "my-order-delivery";
+    delivery.textContent = `Estimated delivery: ${order.delivery_min_days}–${order.delivery_max_days} working days`;
+    card.append(header, items, delivery);
+    const complaintButton = document.createElement("button");
+    complaintButton.className = "button button-outline my-order-cancel";
+    complaintButton.type = "button";
+    complaintButton.textContent = "Report a problem";
+    complaintButton.addEventListener("click", () => openComplaint(order));
+    card.append(complaintButton);
+
+    if (order.status === "CANCELLED") {
+      const cancelled = document.createElement("p");
+      cancelled.className = "my-order-window";
+      cancelled.textContent = "This order has been cancelled.";
+      card.append(cancelled);
+    } else if (order.can_cancel) {
+      const deadline = document.createElement("p");
+      deadline.className = "my-order-window";
+      deadline.textContent = `You can cancel before ${formatOrderDate(order.cancellation_deadline)}.`;
+      const cancelButton = document.createElement("button");
+      cancelButton.className = "button button-outline my-order-cancel";
+      cancelButton.type = "button";
+      cancelButton.textContent = "Cancel order";
+      cancelButton.addEventListener("click", () => openCancelOrder(order));
+      card.append(deadline, cancelButton);
+    } else if (order.status === "PENDING") {
+      const closed = document.createElement("p");
+      closed.className = "my-order-window";
+      closed.textContent = "The 12-hour cancellation window has closed.";
+      card.append(closed);
+    }
+
+    list.append(card);
+  });
+  list.hidden = false;
+}
+
+function openComplaint(order) {
+  if (!activeMyOrdersCredentials) {
+    showToast("Find your order before sending a complaint.");
+    return;
+  }
+  const form = document.querySelector("#complaintForm");
+  const productSelect = document.querySelector("#complaintProduct");
+  productSelect.replaceChildren(...order.items.map((item) => {
+    const option = document.createElement("option");
+    option.value = item.sku;
+    option.textContent = `${productBySku.get(item.sku)?.name || item.sku} × ${item.quantity}`;
+    return option;
+  }));
+  document.querySelector("#complaintOrderSummary").textContent =
+    `Order placed ${formatOrderDate(order.created_at)} · ${order.items.map((item) => productBySku.get(item.sku)?.name || item.sku).join(", ")}`;
+  document.querySelector("#complaintError").hidden = true;
+  document.querySelector("#complaintSuccess").hidden = true;
+  form.reset();
+  document.querySelector("#complaintProductField").hidden = false;
+  document.querySelector("#complaintProduct").required = true;
+  document.querySelector("#myOrdersDialog").close();
+  const dialog = document.querySelector("#complaintDialog");
+  dialog.dataset.correlationId = order.correlation_id;
+  dialog.showModal();
+}
+
+function syncComplaintType() {
+  const isProductComplaint = document.querySelector("#complaintType").value === "product";
+  document.querySelector("#complaintProductField").hidden = !isProductComplaint;
+  document.querySelector("#complaintProduct").required = isProductComplaint;
+}
+
+async function submitComplaint(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = document.querySelector("#submitComplaint");
+  const errorBox = document.querySelector("#complaintError");
+  const successBox = document.querySelector("#complaintSuccess");
+  const dialog = document.querySelector("#complaintDialog");
+  if (!activeMyOrdersCredentials || !dialog.dataset.correlationId) {
+    errorBox.textContent = "Find your order again before submitting a complaint.";
+    errorBox.hidden = false;
+    return;
+  }
+  const formData = new FormData(form);
+  const complaintType = formData.get("complaintType").toString();
+  const payload = {
+    ...activeMyOrdersCredentials,
+    correlation_id: dialog.dataset.correlationId,
+    complaint_type: complaintType,
+    product_sku: complaintType === "product" ? formData.get("productSku").toString() : null,
+    message: formData.get("message").toString().trim()
+  };
+  errorBox.hidden = true;
+  successBox.hidden = true;
+  button.disabled = true;
+  button.classList.add("is-busy");
+  try {
+    const response = await fetch("/orders/complaints", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "We couldn’t send your complaint. Please try again.");
+    successBox.textContent = "Your complaint has been received. MaltaShop support will review it.";
+    successBox.hidden = false;
+    form.reset();
+    document.querySelector("#complaintType").value = "product";
+    syncComplaintType();
+    button.textContent = "Complaint sent";
+    setTimeout(() => {
+      if (dialog.open) dialog.close();
+    }, 1400);
+  } catch (error) {
+    errorBox.textContent = error.message || "We couldn’t reach support. Please try again.";
+    errorBox.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.classList.remove("is-busy");
+    if (button.textContent === "Complaint sent") {
+      setTimeout(() => { button.innerHTML = 'Send complaint <span aria-hidden="true">→</span>'; }, 1500);
+    } else {
+      button.innerHTML = 'Send complaint <span aria-hidden="true">→</span>';
+    }
+  }
+}
+
+function openMyOrders(email = "", phone = "") {
+  const dialog = document.querySelector("#myOrdersDialog");
+  const form = document.querySelector("#myOrdersForm");
+  form.elements.email.value = email;
+  form.elements.phone.value = phone;
+  document.querySelector("#myOrdersError").hidden = true;
+  document.querySelector("#myOrdersList").hidden = true;
+  if (!dialog.open) dialog.showModal();
+  if (email && phone) loadMyOrders(email, phone);
+  else form.elements.email.focus();
+}
+
+async function loadMyOrders(email, phone) {
+  const errorBox = document.querySelector("#myOrdersError");
+  const button = document.querySelector("#findMyOrders");
+  errorBox.hidden = true;
+  document.querySelector("#myOrdersList").hidden = true;
+  button.disabled = true;
+  button.classList.add("is-busy");
+  button.textContent = "Looking for your orders…";
+  activeMyOrdersCredentials = { email, phone };
+  try {
+    const response = await fetch("/orders/my", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, phone })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "We couldn’t find your orders. Please try again.");
+    if (!Array.isArray(result.orders)) throw new Error("The order service returned an unexpected response.");
+    renderMyOrders(result.orders);
+  } catch (error) {
+    errorBox.textContent = error.message || "We couldn’t reach the order service. Please try again.";
+    errorBox.hidden = false;
+  } finally {
+    button.disabled = false;
+    button.classList.remove("is-busy");
+    button.innerHTML = 'Find my orders <span aria-hidden="true">→</span>';
+  }
+}
+
+function openCancelOrder(order) {
+  pendingCancellation = order;
+  document.querySelector("#cancelOrderError").hidden = true;
+  const names = order.items.map((item) => {
+    const product = productBySku.get(item.sku);
+    return `${product?.name || item.sku} × ${item.quantity}`;
+  });
+  document.querySelector("#cancelOrderDescription").textContent =
+    `Cancel ${names.join(", ")}? This cannot be undone. You can cancel this order within 12 hours of placing it, until ${formatOrderDate(order.cancellation_deadline)}.`;
+  document.querySelector("#cancelOrderDialog").showModal();
+}
+
+async function confirmCancelOrder() {
+  if (!pendingCancellation || !activeMyOrdersCredentials) return;
+  const button = document.querySelector("#confirmCancelOrder");
+  const errorBox = document.querySelector("#cancelOrderError");
+  errorBox.hidden = true;
+  button.disabled = true;
+  button.classList.add("is-busy");
+  try {
+    const response = await fetch("/orders/my/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...activeMyOrdersCredentials,
+        correlation_id: pendingCancellation.correlation_id
+      })
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      const error = new Error(result.detail || "We couldn’t cancel this order. Please try again.");
+      error.status = response.status;
+      throw error;
+    }
+    document.querySelector("#cancelOrderDialog").close();
+    showToast(result.already_cancelled ? "This order was already cancelled." : "Your order has been cancelled.");
+    await loadMyOrders(activeMyOrdersCredentials.email, activeMyOrdersCredentials.phone);
+  } catch (error) {
+    errorBox.textContent = error.message || "We couldn’t reach the order service. Please try again.";
+    errorBox.hidden = false;
+    if (error.status === 409) {
+      await loadMyOrders(activeMyOrdersCredentials.email, activeMyOrdersCredentials.phone);
+    }
+  } finally {
+    button.disabled = false;
+    button.classList.remove("is-busy");
+    button.textContent = "Yes, cancel this order";
+  }
 }
 
 document.querySelectorAll("[data-category]").forEach((button) => {
@@ -454,9 +754,10 @@ document.querySelector("#checkoutForm").addEventListener("submit", async (event)
   event.preventDefault();
   if (!cart.length) return;
   const form = event.currentTarget;
+  const formData = new FormData(form);
   const button = document.querySelector("#placeOrder");
   const errorBox = document.querySelector("#checkoutError");
-  const email = new FormData(form).get("email").toString().trim();
+  const email = formData.get("email").toString().trim();
   const signature = JSON.stringify([...cart].sort((a, b) => a.sku.localeCompare(b.sku)));
   const keyName = `maltashop-checkout:${email}:${signature}`;
   let idempotencyKey = sessionStorage.getItem(keyName);
@@ -479,6 +780,12 @@ document.querySelector("#checkoutForm").addEventListener("submit", async (event)
       },
       body: JSON.stringify({
         customer_id: email,
+        full_name: formData.get("fullName").toString().trim(),
+        phone: formData.get("phone").toString().trim(),
+        address: formData.get("address").toString().trim(),
+        city: formData.get("city").toString().trim(),
+        postal_code: formData.get("postalCode").toString().trim(),
+        payment_method: formData.get("paymentMethod").toString(),
         items: cart.map((line) => ({ sku: line.sku, quantity: line.quantity }))
       })
     });
@@ -493,7 +800,15 @@ document.querySelector("#checkoutForm").addEventListener("submit", async (event)
     saveCart();
     renderCart();
     document.querySelector("#checkoutDialog").close();
-    renderConfirmation(result.orders);
+    renderConfirmation(result.orders, {
+      full_name: formData.get("fullName").toString().trim(),
+      address: formData.get("address").toString().trim(),
+      city: formData.get("city").toString().trim(),
+      postal_code: formData.get("postalCode").toString().trim(),
+      email,
+      phone: formData.get("phone").toString().trim(),
+      payment_method: formData.get("paymentMethod").toString()
+    });
   } catch (error) {
     errorBox.textContent = error.message || "We couldn’t reach the order service. Your bag is saved so you can safely try again.";
     errorBox.hidden = false;
@@ -513,11 +828,46 @@ document.querySelectorAll("dialog").forEach((dialog) => {
   });
 });
 
+const welcomeDialog = document.querySelector("#welcomeDialog");
+function closeWelcomeDialog() {
+  welcomeDialog.close();
+}
+
+document.querySelector("#welcomeShopNow").addEventListener("click", () => {
+  closeWelcomeDialog();
+  document.querySelector("#shop").scrollIntoView({ behavior: "smooth" });
+});
+document.querySelector("#welcomeNeverShow").addEventListener("click", () => {
+  try {
+    localStorage.setItem("maltashop-welcome-dismissed", "true");
+  } catch (error) {
+    console.error("Could not save the welcome preference:", error);
+    showToast("Your browser couldn’t save this preference. The welcome message may appear next time.");
+  }
+  closeWelcomeDialog();
+});
+
 document.querySelector("#trackForm").addEventListener("submit", (event) => {
   event.preventDefault();
   lookupOrder(new FormData(event.currentTarget).get("orderId").toString());
 });
+document.querySelector("#myOrdersForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  loadMyOrders(data.get("email").toString().trim(), data.get("phone").toString().trim());
+});
+document.querySelector("#complaintForm").addEventListener("submit", submitComplaint);
+document.querySelector("#complaintType").addEventListener("change", syncComplaintType);
+document.querySelector("#openMyOrders").addEventListener("click", () => openMyOrders());
+document.querySelector("#openMyOrdersFooter").addEventListener("click", () => openMyOrders());
+document.querySelector("#openComplaints").addEventListener("click", () => openMyOrders());
+document.querySelector("#confirmCancelOrder").addEventListener("click", confirmCancelOrder);
 document.querySelector("#openTrack").addEventListener("click", () => openTrackDialog());
+document.querySelector("#deliveryTrack").addEventListener("click", () => openTrackDialog());
+document.querySelector("#viewMyOrdersAfterCheckout").addEventListener("click", () => {
+  document.querySelector("#confirmationDialog").close();
+  openMyOrders(lastCustomerDetails?.email || "", lastCustomerDetails?.phone || "");
+});
 document.querySelector("#trackNewOrder").addEventListener("click", () => {
   document.querySelector("#confirmationDialog").close();
   openTrackDialog(lastOrderIds[0] || "");
@@ -541,3 +891,11 @@ document.addEventListener("keydown", (event) => {
 
 renderProducts();
 renderCart();
+try {
+  if (localStorage.getItem("maltashop-welcome-dismissed") !== "true") {
+    welcomeDialog.showModal();
+  }
+} catch (error) {
+  console.error("Could not read the welcome preference:", error);
+  welcomeDialog.showModal();
+}
