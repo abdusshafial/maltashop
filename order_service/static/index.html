@@ -32,7 +32,10 @@
       <a href="#our-story">Our story</a>
     </nav>
     <div class="header-actions">
-      <button class="my-orders-button" id="openMyOrders" type="button">My orders</button>
+      <button class="my-orders-button" id="accountButton" type="button">Log in</button>
+      <button class="my-orders-button" id="myOrdersButton" type="button" hidden>My orders</button>
+      <button class="my-orders-button" id="managementButton" type="button" hidden>Management</button>
+      <button class="my-orders-button" id="logoutButton" type="button" hidden>Log out</button>
       <label class="search-box">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m16 16 4 4"></path></svg>
         <input id="searchInput" type="search" placeholder="Find your something…" aria-label="Search products">
@@ -148,7 +151,7 @@
       <span>MALTA<span class="wordmark-light">SHOP</span></span>
     </a>
     <p>Thoughtful finds for home, tech and everyday wear.</p>
-    <div class="footer-links"><a href="#shop">Shop</a><a href="#delivery">Delivery details</a><button type="button" id="openMyOrdersFooter">My orders</button><button type="button" id="openComplaints">Complaints</button><button type="button" id="openTrack">Track an order</button></div>
+    <div class="footer-links"><a href="#shop">Shop</a><a href="#delivery">Delivery details</a><button type="button" id="openMyOrdersFooter">My orders</button><button type="button" id="openComplaints">Complaints</button><button type="button" id="openTrack">Track an order</button><button type="button" id="openAccountFooter">Log in / Sign up</button></div>
     <span class="copyright">© 2026 MaltaShop · Estimated island-wide delivery: 2–5 working days</span>
     <span class="developer-credit">Developed by <strong>Abdus Shafial</strong></span>
   </footer>
@@ -219,7 +222,7 @@
           <p class="payment-demo-note"><span aria-hidden="true">ⓘ</span> Demo only — no payment is processed, and no card or account details are collected.</p>
         </fieldset>
         <label class="form-label" for="customerEmail">Email address</label>
-        <input class="form-input" id="customerEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" maxlength="100" required>
+        <input class="form-input" id="customerEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" maxlength="100" readonly required>
         <label class="form-label" for="customerName">Full name</label>
         <input class="form-input" id="customerName" name="fullName" type="text" autocomplete="name" placeholder="Name for delivery" maxlength="100" required>
         <label class="form-label" for="customerPhone">Phone number</label>
@@ -279,17 +282,119 @@
     </div>
   </dialog>
 
+  <dialog class="modal" id="accountDialog" aria-labelledby="accountTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close account form">×</button>
+    <div class="modal-content">
+      <p class="eyebrow">YOUR MALTA SHOP ACCOUNT</p>
+      <h2 id="accountTitle">Welcome <em>in.</em></h2>
+      <p class="modal-intro" id="accountIntro">Log in or create an account to place an order and see your orders.</p>
+      <form id="accountForm">
+        <label class="form-label" for="accountMode">I want to</label>
+        <select class="form-input" id="accountMode" name="mode">
+          <option value="login">Log in</option>
+          <option value="register">Create an account</option>
+        </select>
+        <div id="accountNameField" hidden>
+          <label class="form-label" for="accountName">Full name</label>
+          <input class="form-input" id="accountName" name="fullName" type="text" autocomplete="name" maxlength="100">
+        </div>
+        <label class="form-label" for="accountEmail">Email address</label>
+        <input class="form-input" id="accountEmail" name="email" type="email" autocomplete="email" maxlength="100" required>
+        <label class="form-label" for="accountPassword">Password</label>
+        <input class="form-input" id="accountPassword" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="256" required>
+        <p class="form-error" id="accountError" role="alert" hidden></p>
+        <button class="button button-dark modal-submit" id="accountSubmit" type="submit">Log in <span aria-hidden="true">→</span></button>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog class="modal management-modal" id="managementDialog" aria-labelledby="managementTitle">
+    <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close management">×</button>
+    <div class="modal-content">
+      <p class="eyebrow">SECURE STAFF AREA</p>
+      <h2 id="managementTitle">Shop <em>management.</em></h2>
+      <p class="modal-intro" id="managementRole"></p>
+      <section id="productManagementSection" aria-labelledby="productManagementTitle">
+        <h3 id="productManagementTitle">Inventory and products</h3>
+        <label class="form-label" for="managementProductSelect">Select a product to update</label>
+        <select class="form-input" id="managementProductSelect"></select>
+        <form id="productUpdateForm">
+          <h4 id="productUpdateTitle">Update product details</h4>
+          <div id="manageProductMetadata">
+            <label class="form-label" for="manageProductCategory">Category</label>
+            <input class="form-input" id="manageProductCategory" name="category" maxlength="60" required>
+            <div><label class="form-label" for="manageProductPrice">Price (€)</label><input class="form-input" id="manageProductPrice" name="price" type="number" min="0.01" step="0.01" required></div>
+            <label class="form-label" for="manageProductActive">Availability</label>
+            <select class="form-input" id="manageProductActive" name="active"><option value="true">Active</option><option value="false">Inactive</option></select>
+          </div>
+          <div id="manageProductStockField"><label class="form-label" for="manageProductStock">Stock quantity</label><input class="form-input" id="manageProductStock" name="stock" type="number" min="0" step="1" required></div>
+          <p class="form-error" id="productManagementError" role="alert" hidden></p>
+          <button class="button button-dark modal-submit" type="submit">Save product</button>
+        </form>
+        <details class="management-create" id="productCreateDetails">
+          <summary>Add a new product</summary>
+          <form id="productCreateForm">
+            <label class="form-label" for="newProductSku">SKU</label><input class="form-input" id="newProductSku" name="sku" maxlength="80" required>
+            <label class="form-label" for="newProductName">Product name</label><input class="form-input" id="newProductName" name="name" maxlength="150" required>
+            <label class="form-label" for="newProductCategory">Category</label><input class="form-input" id="newProductCategory" name="category" maxlength="60" required>
+            <label class="form-label" for="newProductPrice">Price (€)</label><input class="form-input" id="newProductPrice" name="price" type="number" min="0.01" step="0.01" required>
+            <label class="form-label" for="newProductImage">Product image URL</label><input class="form-input" id="newProductImage" name="image" type="url" required>
+            <label class="form-label" for="newProductDescription">Description</label><textarea class="form-input complaint-message" id="newProductDescription" name="description" rows="3"></textarea>
+            <p class="form-error" id="productCreateError" role="alert" hidden></p>
+            <button class="button button-outline modal-submit" type="submit">Create product</button>
+          </form>
+        </details>
+      </section>
+      <section id="fulfillmentSection" hidden aria-labelledby="fulfillmentTitle">
+        <h3 id="fulfillmentTitle">Order fulfillment and delivery</h3>
+        <p class="modal-intro">Accept new orders, record the delivery facility and tracking reference, then confirm successful delivery.</p>
+        <div id="fulfillmentOrders" class="management-task-list"></div>
+      </section>
+      <section id="financeSection" hidden aria-labelledby="financeTitle">
+        <h3 id="financeTitle">Finance and payment reconciliation</h3>
+        <p class="modal-intro">Record payments or refunds only after they are confirmed outside this demo. No payment is processed by this site.</p>
+        <div class="finance-summary">
+          <div><span>Recorded revenue</span><strong id="financeRecordedRevenue">€0.00</strong></div>
+          <div><span>Outstanding</span><strong id="financeOutstanding">€0.00</strong></div>
+          <div><span>Refunds recorded</span><strong id="financeRefunded">€0.00</strong></div>
+        </div>
+        <div id="financeOrders" class="management-task-list"></div>
+      </section>
+      <section id="adminUsersSection" hidden aria-labelledby="adminUsersTitle">
+        <h3 id="adminUsersTitle">Users and roles</h3>
+        <div id="adminUsersList" class="management-list"></div>
+        <details class="management-create">
+          <summary>Create a user or staff account</summary>
+          <form id="managedUserForm">
+            <label class="form-label" for="managedUserName">Full name</label><input class="form-input" id="managedUserName" name="fullName" maxlength="100" required>
+            <label class="form-label" for="managedUserEmail">Email</label><input class="form-input" id="managedUserEmail" name="email" type="email" maxlength="100" required>
+            <label class="form-label" for="managedUserPassword">Temporary password</label><input class="form-input" id="managedUserPassword" name="password" type="password" minlength="10" maxlength="256" required>
+            <label class="form-label" for="managedUserRole">Role</label>
+            <select class="form-input" id="managedUserRole" name="role">
+              <option value="customer">Customer</option>
+              <option value="product_management_officer">Product management officer</option>
+              <option value="inventory_manager">Inventory manager</option>
+              <option value="order_fulfillment_officer">Order fulfillment officer</option>
+              <option value="finance_officer">Finance officer</option>
+              <option value="admin">Administrator</option>
+            </select>
+            <p class="form-error" id="managedUserError" role="alert" hidden></p>
+            <button class="button button-outline modal-submit" type="submit">Create account</button>
+          </form>
+        </details>
+        <h3>All customer orders</h3>
+        <div id="adminOrdersList" class="management-list"></div>
+      </section>
+    </div>
+  </dialog>
+
   <dialog class="modal my-orders-modal" id="myOrdersDialog" aria-labelledby="myOrdersTitle">
     <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close my orders">×</button>
     <div class="modal-content">
       <p class="eyebrow">YOUR MALTA SHOP ORDERS</p>
       <h2 id="myOrdersTitle">My <em>orders.</em></h2>
-      <p class="modal-intro">Enter the email address and phone number used at checkout to see your orders—no tracking ID needed. For a Malta number, either the local number or +356 format works. Orders can be cancelled within 12 hours. To report a product or delivery-person issue, choose “Report a problem” on an order.</p>
+      <p class="modal-intro">Your account’s orders appear here. Orders can be cancelled within 12 hours after a confirmation prompt. To report a product or delivery-person issue, choose “Report a problem” on an order.</p>
       <form id="myOrdersForm">
-        <label class="form-label" for="myOrdersEmail">Email address</label>
-        <input class="form-input" id="myOrdersEmail" name="email" type="email" autocomplete="email" maxlength="100" required>
-        <label class="form-label" for="myOrdersPhone">Phone number</label>
-        <input class="form-input" id="myOrdersPhone" name="phone" type="tel" autocomplete="tel" minlength="5" maxlength="30" placeholder="Local number or +356 ..." required>
         <p class="form-error" id="myOrdersError" role="alert" hidden></p>
         <button class="button button-dark modal-submit" id="findMyOrders" type="submit">Find my orders <span aria-hidden="true">→</span></button>
       </form>

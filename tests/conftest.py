@@ -18,6 +18,11 @@ def load_module(name: str, path: Path):
 @pytest.fixture
 def order_module(tmp_path, monkeypatch):
     monkeypatch.setenv("ORDER_DB", str(tmp_path / "orders.db"))
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
+    monkeypatch.delenv("INITIAL_ADMIN_EMAIL", raising=False)
+    monkeypatch.delenv("INITIAL_ADMIN_PASSWORD", raising=False)
+    monkeypatch.delenv("INITIAL_ADMIN_NAME", raising=False)
+    monkeypatch.delenv("DEMO_ACCOUNTS", raising=False)
     return load_module("order_app", ROOT / "order_service" / "app.py")
 
 

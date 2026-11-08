@@ -19,6 +19,11 @@ services:
       - '127.0.0.1:8000:8000'
     environment:
       ORDER_DB: /data/orders.db
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+      INITIAL_ADMIN_NAME: ${INITIAL_ADMIN_NAME:-Shop Administrator}
+      DEMO_ACCOUNTS: ${DEMO_ACCOUNTS:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
     volumes:
       - orderdata:/data
     depends_on:

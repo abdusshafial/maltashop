@@ -9,9 +9,24 @@ const featuredProducts = [
   { sku: "LAMP-01", name: "Soft-light table lamp", category: "Home", price: 58, tag: "A LITTLE GLOW", emoji: "💡", bg: "#d8d2bb", image: "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=700&q=80", description: "Add a softer note to a bedside table, reading nook, or favourite corner." }
 ];
 
-const products = [...featuredProducts, ...additionalProducts];
+const STAFF_ROLES = [
+  "admin",
+  "product_management_officer",
+  "inventory_manager",
+  "order_fulfillment_officer",
+  "finance_officer"
+];
+const ROLE_LABELS = {
+  admin: "administrator",
+  product_management_officer: "product management officer",
+  inventory_manager: "inventory manager",
+  order_fulfillment_officer: "order fulfillment officer",
+  finance_officer: "finance officer"
+};
+
+let products = [...featuredProducts, ...additionalProducts];
 const money = new Intl.NumberFormat("en-MT", { style: "currency", currency: "EUR" });
-const productBySku = new Map(products.map((product) => [product.sku, product]));
+let productBySku = new Map(products.map((product) => [product.sku, product]));
 const productGrid = document.querySelector("#productGrid");
 const emptySearch = document.querySelector("#emptySearch");
 const searchInput = document.querySelector("#searchInput");
@@ -25,6 +40,7 @@ const cartDrawer = document.querySelector("#cartDrawer");
 const drawerBackdrop = document.querySelector("#drawerBackdrop");
 const toast = document.querySelector("#toast");
 let activeCategory = "All";
+let authenticatedUser = null;
 let cart = loadCart();
 let favorites = loadFavorites();
 let favoritesOnly = false;
@@ -35,10 +51,14 @@ let lastOrderIds = [];
 let lastCustomerDetails = null;
 let activeMyOrdersCredentials = null;
 let pendingCancellation = null;
+let inventory = [];
+let managementUsers = [];
+let checkoutAfterLogin = false;
 
 function loadCart() {
   try {
-    const saved = JSON.parse(localStorage.getItem("maltashop-cart") || "[]");
+    const key = authenticatedUser ? `maltashop-cart:${authenticatedUser.id}` : "maltashop-cart";
+    const saved = JSON.parse(localStorage.getItem(key) || "[]");
     if (!Array.isArray(saved)) throw new TypeError("Saved cart must be a list");
     return saved.filter((line) => productBySku.has(line.sku) && Number.isInteger(line.quantity) && line.quantity > 0 && line.quantity <= 100);
   } catch (error) {
@@ -49,11 +69,27 @@ function loadCart() {
 
 function saveCart() {
   try {
-    localStorage.setItem("maltashop-cart", JSON.stringify(cart));
+    const key = authenticatedUser ? `maltashop-cart:${authenticatedUser.id}` : "maltashop-cart";
+    localStorage.setItem(key, JSON.stringify(cart));
   } catch (error) {
     console.error("Could not save the shopping bag:", error);
     showToast("Your browser couldn’t save this bag. Keep this tab open while you shop.");
   }
+}
+
+function switchCartToAuthenticatedUser(previousCart) {
+  const accountCart = loadCart();
+  const quantities = new Map(accountCart.map((line) => [line.sku, line.quantity]));
+  for (const line of previousCart) {
+    const product = productBySku.get(line.sku);
+    if (!product || product.active === false) continue;
+    const stockLimit = Number.isInteger(product.stock) ? product.stock : 100;
+    if (stockLimit <= 0) continue;
+    const quantity = Math.min(100, stockLimit, (quantities.get(line.sku) || 0) + line.quantity);
+    quantities.set(line.sku, quantity);
+  }
+  cart = [...quantities].map(([sku, quantity]) => ({ sku, quantity }));
+  saveCart();
 }
 
 function loadFavorites() {
@@ -83,6 +119,16 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2600);
 }
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[character]);
+}
+
 function renderProducts() {
   const search = searchInput.value.trim().toLocaleLowerCase();
   const maximumPrice = Number(priceRange.value);
@@ -101,15 +147,22 @@ function renderProducts() {
 
   productGrid.innerHTML = visible.map((product) => `
     <article class="product-card">
-      <div class="product-visual" style="--product-bg:${product.bg}">
-        <img src="${product.image}" alt="" loading="lazy">
-        <span class="product-tag">${product.tag}</span>
-        <button class="favorite-button${favorites.includes(product.sku) ? " is-saved" : ""}" type="button" data-favorite="${product.sku}" aria-label="${favorites.includes(product.sku) ? "Remove" : "Save"} ${product.name} ${favorites.includes(product.sku) ? "from" : "to"} favourites" aria-pressed="${favorites.includes(product.sku)}">${favorites.includes(product.sku) ? "♥" : "♡"}</button>
-        <button class="quick-view" type="button" data-view="${product.sku}">Quick view</button>
-        <button class="quick-add" type="button" data-add="${product.sku}" aria-label="Add ${product.name} to bag">+</button>
+      <div class="product-visual" style="--product-bg:${product.bg || "#e5d7c6"}">
+        <img src="${escapeHtml(product.image)}" alt="" loading="lazy">
+        <span class="product-tag">${escapeHtml(product.tag)}</span>
+        <button class="favorite-button${favorites.includes(product.sku) ? " is-saved" : ""}" type="button" data-favorite="${escapeHtml(product.sku)}" aria-label="${favorites.includes(product.sku) ? "Remove" : "Save"} ${escapeHtml(product.name)} ${favorites.includes(product.sku) ? "from" : "to"} favourites" aria-pressed="${favorites.includes(product.sku)}">${favorites.includes(product.sku) ? "♥" : "♡"}</button>
+        <button class="quick-view" type="button" data-view="${escapeHtml(product.sku)}">Quick view</button>
+        <button class="quick-add" type="button" data-add="${escapeHtml(product.sku)}" aria-label="Add ${escapeHtml(product.name)} to bag" ${product.stock <= 0 ? "disabled" : ""}>+</button>
       </div>
       <div class="product-meta">
-        <div><h3>${product.name}</h3><p class="product-category">${product.category} · ${product.sku}</p><p class="product-delivery">Estimated delivery: 2–5 working days</p></div>
+        <div>
+          <h3>${escapeHtml(product.name)}</h3>
+          <p class="product-category">${escapeHtml(product.category)} · ${escapeHtml(product.sku)}</p>
+          ${product.stock > 0
+            ? `<p class="product-stock" aria-label="Available stock: ${product.stock}"><span class="stock-indicator" aria-hidden="true"></span>Available: ${product.stock}</p>`
+            : '<p class="product-stock is-out-of-stock"><span class="stock-indicator" aria-hidden="true"></span>Out of stock</p>'}
+          <p class="product-delivery">Estimated delivery: 2–5 working days</p>
+        </div>
         <span class="product-price">${money.format(product.price)}</span>
       </div>
     </article>
@@ -152,8 +205,9 @@ function openProductDialog(sku) {
   document.querySelector("#productDialogPrice").textContent = money.format(product.price);
   document.querySelector("#productDialogDescription").textContent = product.description;
   document.querySelector("#productDialogDetails").innerHTML = `
-    <div><span>Product code</span><strong>${product.sku}</strong></div>
-    <div><span>Category</span><strong>${product.category}</strong></div>
+    <div><span>Product code</span><strong>${escapeHtml(product.sku)}</strong></div>
+    <div><span>Category</span><strong>${escapeHtml(product.category)}</strong></div>
+    <div><span>Available stock</span><strong>${product.stock > 0 ? product.stock : "Out of stock"}</strong></div>
     <div><span>Delivery estimate</span><strong>2–5 working days</strong></div>
     <p>Estimated after checkout, Monday to Friday, across Malta and Gozo. Actual delivery time may vary.</p>
   `;
@@ -184,21 +238,21 @@ function renderCart() {
     const product = productBySku.get(line.sku);
     return `
       <article class="cart-line">
-        <div class="cart-line-image" style="--product-bg:${product.bg}">
-          <img src="${product.image}" alt="" loading="lazy">
+        <div class="cart-line-image" style="--product-bg:${product.bg || "#e5d7c6"}">
+          <img src="${escapeHtml(product.image)}" alt="" loading="lazy">
         </div>
         <div class="cart-line-main">
-          <h3>${product.name}</h3>
+          <h3>${escapeHtml(product.name)}</h3>
           <p>${money.format(product.price)} each</p>
-          <div class="quantity-control" aria-label="Quantity for ${product.name}">
-            <button type="button" data-quantity="-1" data-sku="${product.sku}" aria-label="Remove one ${product.name}">−</button>
+          <div class="quantity-control" aria-label="Quantity for ${escapeHtml(product.name)}">
+            <button type="button" data-quantity="-1" data-sku="${escapeHtml(product.sku)}" aria-label="Remove one ${escapeHtml(product.name)}">−</button>
             <span>${line.quantity}</span>
-            <button type="button" data-quantity="1" data-sku="${product.sku}" aria-label="Add one ${product.name}">+</button>
+            <button type="button" data-quantity="1" data-sku="${escapeHtml(product.sku)}" aria-label="Add one ${escapeHtml(product.name)}">+</button>
           </div>
         </div>
         <div class="cart-line-end">
           <strong>${money.format(product.price * line.quantity)}</strong>
-          <button class="remove-item" type="button" data-remove="${product.sku}">Remove</button>
+          <button class="remove-item" type="button" data-remove="${escapeHtml(product.sku)}">Remove</button>
         </div>
       </article>
     `;
@@ -209,10 +263,15 @@ function renderCart() {
 }
 
 function addToCart(sku) {
+  const product = productBySku.get(sku);
+  if (!product || !product.active || product.stock <= 0) {
+    showToast("This product is no longer available.");
+    return;
+  }
   const line = cart.find((item) => item.sku === sku);
   if (line) {
-    if (line.quantity >= 100) {
-      showToast("That’s the maximum quantity for one item.");
+    if (line.quantity >= Math.min(100, product.stock)) {
+      showToast("There is not enough stock for that quantity.");
       return;
     }
     line.quantity += 1;
@@ -234,6 +293,515 @@ function setDrawerOpen(open) {
   else document.querySelector("#openCart").focus();
 }
 
+function openAccountDialog({ afterLogin = false } = {}) {
+  checkoutAfterLogin = afterLogin;
+  document.querySelector("#accountError").hidden = true;
+  document.querySelector("#accountDialog").showModal();
+  document.querySelector("#accountEmail").value = authenticatedUser?.email || "";
+}
+
+function renderAccountState() {
+  const loggedIn = Boolean(authenticatedUser);
+  const isStaff = loggedIn && STAFF_ROLES.includes(authenticatedUser.role);
+  document.querySelector("#accountButton").hidden = loggedIn;
+  document.querySelector("#accountButton").textContent = "Log in";
+  document.querySelector("#logoutButton").hidden = !loggedIn;
+  document.querySelector("#myOrdersButton").hidden = !loggedIn;
+  document.querySelector("#managementButton").hidden = !isStaff;
+  if (loggedIn) {
+    document.querySelector("#accountButton").textContent = authenticatedUser.full_name;
+    document.querySelector("#logoutButton").textContent = "Log out";
+  }
+}
+
+async function loadStorefrontProducts() {
+  const response = await fetch("/products");
+  const result = await response.json();
+  if (!response.ok || !Array.isArray(result.products)) {
+    throw new Error(result.detail || "The product catalog could not be loaded.");
+  }
+  const oldProducts = productBySku;
+  products = result.products.map((product) => ({
+    ...product,
+    bg: oldProducts.get(product.sku)?.bg || "#e5d7c6"
+  }));
+  productBySku = new Map(products.map((product) => [product.sku, product]));
+  cart = loadCart();
+  favorites = [...new Set(favorites.filter((sku) => productBySku.has(sku)))];
+  updateCategoryFilters();
+  renderProducts();
+  renderCart();
+}
+
+function updateCategoryFilters() {
+  const group = document.querySelector(".category-filters");
+  const current = activeCategory;
+  const categories = [...new Set(products.map((product) => product.category))].sort();
+  const options = ["All", ...categories];
+  if (!options.includes(current)) activeCategory = "All";
+  group.replaceChildren(...options.map((category) => {
+    const button = document.createElement("button");
+    button.className = `filter-chip${activeCategory === category ? " is-active" : ""}`;
+    button.type = "button";
+    button.dataset.category = category;
+    button.textContent = category === "All" ? "Everything" : category;
+    button.addEventListener("click", () => {
+      activeCategory = category;
+      group.querySelectorAll("[data-category]").forEach((item) => item.classList.toggle("is-active", item === button));
+      renderProducts();
+    });
+    return button;
+  }));
+}
+
+async function loadAuthenticatedUser() {
+  const response = await fetch("/auth/me");
+  if (response.status === 401) {
+    authenticatedUser = null;
+    renderAccountState();
+    return;
+  }
+  const user = await response.json();
+  if (!response.ok) throw new Error(user.detail || "Could not load the signed-in account.");
+  authenticatedUser = user;
+  renderAccountState();
+}
+
+async function sendJson(url, body, method = "POST") {
+  const options = { method };
+  if (method !== "GET") {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(url, options);
+  const result = response.status === 204 ? {} : await response.json();
+  if (!response.ok) throw new Error(result.detail || "The request could not be completed.");
+  return result;
+}
+
+function syncAccountMode() {
+  const registering = document.querySelector("#accountMode").value === "register";
+  const nameField = document.querySelector("#accountNameField");
+  nameField.hidden = !registering;
+  document.querySelector("#accountName").required = registering;
+  document.querySelector("#accountPassword").autocomplete = registering ? "new-password" : "current-password";
+  document.querySelector("#accountSubmit").innerHTML =
+    `${registering ? "Create account" : "Log in"} <span aria-hidden="true">→</span>`;
+  document.querySelector("#accountTitle").innerHTML = registering ? "Join the <em>islands.</em>" : "Welcome <em>in.</em>";
+}
+
+async function submitAccount(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const button = document.querySelector("#accountSubmit");
+  const errorBox = document.querySelector("#accountError");
+  const registering = formData.get("mode") === "register";
+  const body = {
+    email: formData.get("email").toString().trim(),
+    password: formData.get("password").toString()
+  };
+  if (registering) body.full_name = formData.get("fullName").toString().trim();
+  errorBox.hidden = true;
+  button.disabled = true;
+  try {
+    const previousCart = cart;
+    authenticatedUser = await sendJson(registering ? "/auth/register" : "/auth/login", body);
+    switchCartToAuthenticatedUser(previousCart);
+    renderCart();
+    renderAccountState();
+    document.querySelector("#accountDialog").close();
+    showToast(`Welcome, ${authenticatedUser.full_name}.`);
+    const continueToCheckout = checkoutAfterLogin;
+    checkoutAfterLogin = false;
+    if (continueToCheckout) document.querySelector("#startCheckout").click();
+  } catch (error) {
+    errorBox.textContent = error.message || "Account sign-in failed.";
+    errorBox.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function logout() {
+  try {
+    await sendJson("/auth/logout", {});
+    authenticatedUser = null;
+    cart = [];
+    saveCart();
+    renderCart();
+    renderAccountState();
+    document.querySelector("#managementDialog").close();
+    document.querySelector("#myOrdersDialog").close();
+    showToast("You have logged out.");
+  } catch (error) {
+    showToast(error.message || "Could not log out. Please try again.");
+  }
+}
+
+function addManagementUserRow(user) {
+  const row = document.createElement("article");
+  row.className = "management-row";
+  const details = document.createElement("span");
+  details.textContent = `${user.full_name} · ${user.email}${user.is_active ? "" : " · inactive"}`;
+  const role = document.createElement("select");
+  role.className = "form-input";
+  role.setAttribute("aria-label", `Role for ${user.email}`);
+  for (const [value, label] of [
+    ["customer", "Customer"],
+    ["product_management_officer", "Product officer"],
+    ["inventory_manager", "Inventory manager"],
+    ["order_fulfillment_officer", "Order fulfillment"],
+    ["finance_officer", "Finance officer"],
+    ["admin", "Admin"]
+  ]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    option.selected = user.role === value;
+    role.append(option);
+  }
+  const active = document.createElement("select");
+  active.className = "form-input";
+  active.setAttribute("aria-label", `Status for ${user.email}`);
+  for (const [value, label] of [["true", "Active"], ["false", "Inactive"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    option.selected = user.is_active === (value === "true");
+    active.append(option);
+  }
+  const save = document.createElement("button");
+  save.className = "button button-outline";
+  save.type = "button";
+  save.textContent = "Save";
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      await sendJson(`/admin/users/${encodeURIComponent(user.id)}`, {
+        role: role.value, is_active: active.value === "true"
+      }, "PATCH");
+      showToast("User access updated.");
+      await loadManagementUsers();
+    } catch (error) {
+      showToast(error.message || "Could not update user access.");
+    } finally {
+      save.disabled = false;
+    }
+  });
+  row.append(details, role, active, save);
+  return row;
+}
+
+async function loadManagementUsers() {
+  const result = await sendJson("/admin/users", null, "GET");
+  managementUsers = result.users;
+  const container = document.querySelector("#adminUsersList");
+  container.replaceChildren(...managementUsers.map(addManagementUserRow));
+}
+
+function renderAdminOrders(orders) {
+  const container = document.querySelector("#adminOrdersList");
+  container.replaceChildren();
+  if (!orders.length) {
+    container.textContent = "No orders have been placed.";
+    return;
+  }
+  for (const order of orders) {
+    const row = document.createElement("article");
+    row.className = "management-row";
+    row.textContent =
+      `${order.created_at || "Date unavailable"} · ${order.full_name || order.customer_email} · ` +
+      `${order.product_name} × ${order.quantity} · €${Number(order.unit_price).toFixed(2)} · ${order.status}`;
+    container.append(row);
+  }
+}
+
+function populateManagedProduct(product) {
+  if (!product) return;
+  document.querySelector("#manageProductCategory").value = product.category;
+  document.querySelector("#manageProductPrice").value = product.price.toFixed(2);
+  document.querySelector("#manageProductStock").value = product.stock;
+  document.querySelector("#manageProductActive").value = String(product.active);
+}
+
+async function loadManagementProducts() {
+  const result = await sendJson("/admin/products", null, "GET");
+  inventory = result.products;
+  const select = document.querySelector("#managementProductSelect");
+  select.replaceChildren(...inventory.map((product) => {
+    const option = document.createElement("option");
+    option.value = product.sku;
+    option.textContent = `${product.name} · ${product.sku} · ${product.stock} in stock`;
+    return option;
+  }));
+  populateManagedProduct(inventory[0]);
+}
+
+function statusLabel(status) {
+  return ({
+    PENDING: "Order received",
+    RECEIVED: "Accepted for fulfillment",
+    DISPATCHED: "Sent to delivery facility",
+    DELIVERED: "Delivered",
+    CANCELLED: "Cancelled"
+  })[status] || status;
+}
+
+function renderFulfillmentOrders(orders) {
+  const container = document.querySelector("#fulfillmentOrders");
+  container.replaceChildren();
+  if (!orders.length) {
+    container.textContent = "No active orders are waiting for fulfillment.";
+    return;
+  }
+  for (const order of orders) {
+    const row = document.createElement("article");
+    row.className = "management-task-card";
+    const heading = document.createElement("h4");
+    heading.textContent = `${order.full_name || order.customer_email} · ${statusLabel(order.status)}`;
+    const details = document.createElement("p");
+    details.textContent =
+      `${order.items.map((item) => `${item.name} × ${item.quantity}`).join(", ")} · ` +
+      `${order.address}, ${order.city} ${order.postal_code} · ${order.phone}`;
+    row.append(heading, details);
+    if (order.facility || order.tracking_reference) {
+      const tracking = document.createElement("p");
+      tracking.textContent = `Facility: ${order.facility || "—"} · Tracking: ${order.tracking_reference || "—"}`;
+      row.append(tracking);
+    }
+
+    const next = {
+      PENDING: "RECEIVED",
+      RECEIVED: "DISPATCHED",
+      DISPATCHED: "DELIVERED"
+    }[order.status];
+    if (next) {
+      const controls = document.createElement("div");
+      controls.className = "fulfillment-controls";
+      let facilityInput;
+      let trackingInput;
+      if (next === "DISPATCHED") {
+        facilityInput = document.createElement("input");
+        facilityInput.className = "form-input";
+        facilityInput.placeholder = "Delivery facility";
+        facilityInput.setAttribute("aria-label", "Delivery facility");
+        facilityInput.required = true;
+        trackingInput = document.createElement("input");
+        trackingInput.className = "form-input";
+        trackingInput.placeholder = "Tracking reference";
+        trackingInput.setAttribute("aria-label", "Tracking reference");
+        trackingInput.required = true;
+        controls.append(facilityInput, trackingInput);
+      }
+      const action = document.createElement("button");
+      action.className = "button button-outline";
+      action.type = "button";
+      action.textContent = ({
+        RECEIVED: "Accept order",
+        DISPATCHED: "Send to delivery facility",
+        DELIVERED: "Confirm delivery"
+      })[next];
+      action.addEventListener("click", async () => {
+        if (next === "DISPATCHED" && (!facilityInput.value.trim() || !trackingInput.value.trim())) {
+          showToast("Enter the delivery facility and tracking reference.");
+          return;
+        }
+        action.disabled = true;
+        try {
+          await sendJson(`/staff/fulfillment/orders/${encodeURIComponent(order.correlation_id)}`, {
+            status: next,
+            facility: facilityInput?.value.trim() || null,
+            tracking_reference: trackingInput?.value.trim() || null
+          }, "PATCH");
+          await loadFulfillmentOrders();
+          await loadStorefrontProducts();
+          showToast(`Order updated: ${statusLabel(next)}.`);
+        } catch (error) {
+          showToast(error.message || "Could not update this delivery.");
+          action.disabled = false;
+        }
+      });
+      controls.append(action);
+      row.append(controls);
+    }
+    container.append(row);
+  }
+}
+
+async function loadFulfillmentOrders() {
+  const result = await sendJson("/staff/fulfillment/orders", null, "GET");
+  renderFulfillmentOrders(result.orders);
+}
+
+function renderFinanceSummary(result) {
+  document.querySelector("#financeRecordedRevenue").textContent = money.format(result.summary.recorded_revenue);
+  document.querySelector("#financeOutstanding").textContent = money.format(result.summary.outstanding);
+  document.querySelector("#financeRefunded").textContent = money.format(result.summary.refunded);
+  const container = document.querySelector("#financeOrders");
+  container.replaceChildren();
+  if (!result.orders.length) {
+    container.textContent = "No orders to reconcile.";
+    return;
+  }
+  for (const order of result.orders) {
+    const row = document.createElement("article");
+    row.className = "management-task-card";
+    const heading = document.createElement("h4");
+    heading.textContent = `${order.product_name} × ${order.quantity} · ${money.format(order.total)}`;
+    const details = document.createElement("p");
+    details.textContent =
+      `${order.customer_email} · ${order.payment_method} · ${statusLabel(order.status)} · ` +
+      `Payment: ${order.payment_status}`;
+    row.append(heading, details);
+    if (order.payment_status === "UNPAID" && order.status !== "CANCELLED") {
+      const paid = document.createElement("button");
+      paid.className = "button button-outline";
+      paid.type = "button";
+      paid.textContent = "Record payment received";
+      paid.addEventListener("click", () => updateFinancePayment(order.order_id, "PAID", paid));
+      row.append(paid);
+    } else if (order.payment_status === "PAID" && order.status === "CANCELLED") {
+      const refunded = document.createElement("button");
+      refunded.className = "button button-outline";
+      refunded.type = "button";
+      refunded.textContent = "Record refund issued";
+      refunded.addEventListener("click", () => updateFinancePayment(order.order_id, "REFUNDED", refunded));
+      row.append(refunded);
+    }
+    container.append(row);
+  }
+}
+
+async function updateFinancePayment(orderId, paymentStatus, button) {
+  button.disabled = true;
+  try {
+    await sendJson(`/staff/finance/orders/${encodeURIComponent(orderId)}/payment`, {
+      payment_status: paymentStatus
+    }, "PATCH");
+    const summary = await sendJson("/staff/finance/summary", null, "GET");
+    renderFinanceSummary(summary);
+    showToast(`Payment marked ${paymentStatus.toLowerCase()}.`);
+  } catch (error) {
+    button.disabled = false;
+    showToast(error.message || "Could not update the payment record.");
+  }
+}
+
+async function openManagement() {
+  if (!authenticatedUser || !STAFF_ROLES.includes(authenticatedUser.role)) {
+    showToast("You do not have permission to access management.");
+    return;
+  }
+  const role = authenticatedUser.role;
+  const isAdmin = role === "admin";
+  const canManageProducts = isAdmin || role === "product_management_officer" || role === "inventory_manager";
+  document.querySelector("#managementRole").textContent = `Signed in as ${ROLE_LABELS[role]}.`;
+  document.querySelector("#adminUsersSection").hidden = !isAdmin;
+  document.querySelector("#productManagementSection").hidden = !canManageProducts;
+  document.querySelector("#fulfillmentSection").hidden =
+    !isAdmin && role !== "order_fulfillment_officer";
+  document.querySelector("#financeSection").hidden = !isAdmin && role !== "finance_officer";
+  document.querySelector("#manageProductMetadata").hidden = role === "inventory_manager";
+  document.querySelectorAll("#manageProductMetadata input, #manageProductMetadata select").forEach((input) => {
+    input.disabled = role === "inventory_manager";
+  });
+  document.querySelector("#manageProductStockField").hidden =
+    role === "product_management_officer";
+  document.querySelector("#manageProductStock").disabled = role === "product_management_officer";
+  document.querySelector("#productCreateDetails").hidden = role === "inventory_manager";
+  try {
+    if (canManageProducts) await loadManagementProducts();
+    if (role === "inventory_manager") {
+      document.querySelector("#productUpdateTitle").textContent = "Update stock quantity";
+      document.querySelector("#manageProductStock").required = true;
+    } else {
+      document.querySelector("#productUpdateTitle").textContent = "Update product details";
+      document.querySelector("#manageProductStock").required = role === "admin";
+    }
+    if (role === "order_fulfillment_officer" || isAdmin) await loadFulfillmentOrders();
+    if (role === "finance_officer" || isAdmin) {
+      renderFinanceSummary(await sendJson("/staff/finance/summary", null, "GET"));
+    }
+    if (isAdmin) {
+      await loadManagementUsers();
+      const orders = await sendJson("/admin/orders", null, "GET");
+      renderAdminOrders(orders.orders);
+    }
+    document.querySelector("#managementDialog").showModal();
+  } catch (error) {
+    showToast(error.message || "Could not load management tools.");
+  }
+}
+
+async function refreshProducts() {
+  await loadStorefrontProducts();
+  await loadManagementProducts();
+}
+
+async function updateManagedProduct(event) {
+  event.preventDefault();
+  const sku = document.querySelector("#managementProductSelect").value;
+  const errorBox = document.querySelector("#productManagementError");
+  errorBox.hidden = true;
+  const role = authenticatedUser.role;
+  const body = role === "inventory_manager"
+    ? { stock: Number(document.querySelector("#manageProductStock").value) }
+    : {
+      category: document.querySelector("#manageProductCategory").value.trim(),
+      price: Number(document.querySelector("#manageProductPrice").value),
+      active: document.querySelector("#manageProductActive").value === "true"
+    };
+  if (role === "admin") body.stock = Number(document.querySelector("#manageProductStock").value);
+  try {
+    await sendJson(`/admin/products/${encodeURIComponent(sku)}`, body, "PATCH");
+    await refreshProducts();
+    showToast(role === "inventory_manager" ? "Stock quantity updated." : "Product details updated.");
+  } catch (error) {
+    errorBox.textContent = error.message || "Could not update the product.";
+    errorBox.hidden = false;
+  }
+}
+
+async function createManagedProduct(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const errorBox = document.querySelector("#productCreateError");
+  errorBox.hidden = true;
+  const body = Object.fromEntries(formData.entries());
+  body.price = Number(body.price);
+  body.stock = 0;
+  try {
+    await sendJson("/admin/products", body);
+    form.reset();
+    await refreshProducts();
+    document.querySelector("#managementProductSelect").value = body.sku;
+    populateManagedProduct(inventory.find((product) => product.sku === body.sku));
+    showToast("Product created and added to inventory.");
+  } catch (error) {
+    errorBox.textContent = error.message || "Could not create the product.";
+    errorBox.hidden = false;
+  }
+}
+
+async function createManagedUser(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const body = Object.fromEntries(new FormData(form).entries());
+  const errorBox = document.querySelector("#managedUserError");
+  errorBox.hidden = true;
+  try {
+    await sendJson("/admin/users", body);
+    form.reset();
+    await loadManagementUsers();
+    showToast("User account created.");
+  } catch (error) {
+    errorBox.textContent = error.message || "Could not create the user.";
+    errorBox.hidden = false;
+  }
+}
+
 function createCorrelationId() {
   return globalThis.crypto?.randomUUID?.() || `corr-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -251,7 +819,7 @@ function renderReview() {
   document.querySelector("#checkoutReview").innerHTML = `
     ${cart.map((line) => {
       const product = productBySku.get(line.sku);
-      return `<div class="review-row"><span>${product.name} × ${line.quantity}</span><strong>${money.format(product.price * line.quantity)}</strong></div>`;
+      return `<div class="review-row"><span>${escapeHtml(product.name)} × ${line.quantity}</span><strong>${money.format(product.price * line.quantity)}</strong></div>`;
     }).join("")}
     <div class="review-row review-total"><span>Total</span><strong>${money.format(cartTotal())}</strong></div>
     <div class="review-method">Demo preference <strong>${paymentLabel || "Choose a method"}</strong></div>
@@ -259,6 +827,11 @@ function renderReview() {
 }
 
 function openTrackDialog(orderId = "") {
+  if (!authenticatedUser) {
+    openAccountDialog();
+    showToast("Log in to track your orders.");
+    return;
+  }
   const input = document.querySelector("#trackOrderId");
   input.value = orderId;
   document.querySelector("#trackResult").hidden = true;
@@ -292,7 +865,7 @@ async function lookupOrder(orderId) {
     if (!response.ok) throw new Error(response.status === 404 ? "We couldn’t find that order. Check the ID and try again." : (order.detail || "Order lookup failed."));
 
     const heading = document.createElement("h3");
-    heading.textContent = order.status === "PENDING" ? "Your order is in the works." : `Order status: ${order.status}`;
+    heading.textContent = `Order status: ${statusLabel(order.status)}`;
     const id = document.createElement("p");
     id.innerHTML = "<strong>Order ID</strong>";
     const idValue = document.createElement("p");
@@ -306,6 +879,17 @@ async function lookupOrder(orderId) {
     const deliveryValue = document.createElement("p");
     deliveryValue.textContent = formatDeliveryRange(order);
     result.replaceChildren(heading, id, idValue, item, itemValue, delivery, deliveryValue);
+    if (order.delivery_facility || order.delivery_tracking_id) {
+      const facility = document.createElement("p");
+      facility.innerHTML = "<strong>Delivery facility</strong>";
+      const facilityValue = document.createElement("p");
+      facilityValue.textContent = order.delivery_facility || "Not assigned";
+      const tracking = document.createElement("p");
+      tracking.innerHTML = "<strong>Delivery tracking reference</strong>";
+      const trackingValue = document.createElement("p");
+      trackingValue.textContent = order.delivery_tracking_id || "Not assigned";
+      result.append(facility, facilityValue, tracking, trackingValue);
+    }
     result.hidden = false;
   } catch (error) {
     errorBox.textContent = error.message || "We couldn’t look up that order. Please try again.";
@@ -361,7 +945,7 @@ function renderMyOrders(orders) {
   if (!orders.length) {
     const empty = document.createElement("p");
     empty.className = "my-orders-empty";
-    empty.textContent = "No orders were found for that email and phone number.";
+    empty.textContent = "Your account has no orders yet.";
     list.append(empty);
     list.hidden = false;
     return;
@@ -376,7 +960,7 @@ function renderMyOrders(orders) {
     title.textContent = `Order placed ${formatOrderDate(order.created_at)}`;
     const status = document.createElement("span");
     status.className = `my-order-status${order.status === "CANCELLED" ? " is-cancelled" : ""}`;
-    status.textContent = order.status === "CANCELLED" ? "Cancelled" : order.status === "PENDING" ? "Confirmed" : order.status;
+    status.textContent = statusLabel(order.status);
     header.append(title, status);
 
     const items = document.createElement("ul");
@@ -384,7 +968,7 @@ function renderMyOrders(orders) {
     order.items.forEach((item) => {
       const line = document.createElement("li");
       const product = productBySku.get(item.sku);
-      line.textContent = `${product?.name || item.sku} × ${item.quantity}`;
+      line.textContent = `${item.name || product?.name || item.sku} × ${item.quantity}`;
       items.append(line);
     });
 
@@ -392,6 +976,14 @@ function renderMyOrders(orders) {
     delivery.className = "my-order-delivery";
     delivery.textContent = `Estimated delivery: ${order.delivery_min_days}–${order.delivery_max_days} working days`;
     card.append(header, items, delivery);
+    if (order.delivery_facility || order.delivery_tracking_id) {
+      const tracking = document.createElement("p");
+      tracking.className = "my-order-delivery";
+      tracking.textContent =
+        `Delivery facility: ${order.delivery_facility || "Not assigned"} · ` +
+        `Tracking reference: ${order.delivery_tracking_id || "Not assigned"}`;
+      card.append(tracking);
+    }
     const complaintButton = document.createElement("button");
     complaintButton.className = "button button-outline my-order-cancel";
     complaintButton.type = "button";
@@ -427,7 +1019,7 @@ function renderMyOrders(orders) {
 }
 
 function openComplaint(order) {
-  if (!activeMyOrdersCredentials) {
+  if (!authenticatedUser) {
     showToast("Find your order before sending a complaint.");
     return;
   }
@@ -515,15 +1107,15 @@ async function submitComplaint(event) {
 }
 
 function openMyOrders(email = "", phone = "") {
+  if (!authenticatedUser) {
+    openAccountDialog();
+    return;
+  }
   const dialog = document.querySelector("#myOrdersDialog");
-  const form = document.querySelector("#myOrdersForm");
-  form.elements.email.value = email;
-  form.elements.phone.value = phone;
   document.querySelector("#myOrdersError").hidden = true;
   document.querySelector("#myOrdersList").hidden = true;
   if (!dialog.open) dialog.showModal();
-  if (email && phone) loadMyOrders(email, phone);
-  else form.elements.email.focus();
+  loadMyOrders(authenticatedUser.email, "");
 }
 
 async function loadMyOrders(email, phone) {
@@ -539,7 +1131,7 @@ async function loadMyOrders(email, phone) {
     const response = await fetch("/orders/my", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, phone })
+      body: JSON.stringify({})
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "We couldn’t find your orders. Please try again.");
@@ -560,7 +1152,7 @@ function openCancelOrder(order) {
   document.querySelector("#cancelOrderError").hidden = true;
   const names = order.items.map((item) => {
     const product = productBySku.get(item.sku);
-    return `${product?.name || item.sku} × ${item.quantity}`;
+    return `${item.name || product?.name || item.sku} × ${item.quantity}`;
   });
   document.querySelector("#cancelOrderDescription").textContent =
     `Cancel ${names.join(", ")}? This cannot be undone. You can cancel this order within 12 hours of placing it, until ${formatOrderDate(order.cancellation_deadline)}.`;
@@ -579,7 +1171,6 @@ async function confirmCancelOrder() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ...activeMyOrdersCredentials,
         correlation_id: pendingCancellation.correlation_id
       })
     });
@@ -591,12 +1182,12 @@ async function confirmCancelOrder() {
     }
     document.querySelector("#cancelOrderDialog").close();
     showToast(result.already_cancelled ? "This order was already cancelled." : "Your order has been cancelled.");
-    await loadMyOrders(activeMyOrdersCredentials.email, activeMyOrdersCredentials.phone);
+    await loadMyOrders(authenticatedUser.email, "");
   } catch (error) {
     errorBox.textContent = error.message || "We couldn’t reach the order service. Please try again.";
     errorBox.hidden = false;
     if (error.status === 409) {
-      await loadMyOrders(activeMyOrdersCredentials.email, activeMyOrdersCredentials.phone);
+      await loadMyOrders(authenticatedUser.email, "");
     }
   } finally {
     button.disabled = false;
@@ -724,7 +1315,15 @@ document.querySelector("#cartItems").addEventListener("click", (event) => {
     cart = cart.filter((line) => line.sku !== removeButton.dataset.remove);
   } else if (quantityButton) {
     const line = cart.find((item) => item.sku === quantityButton.dataset.sku);
-    if (line) line.quantity += Number(quantityButton.dataset.quantity);
+    if (line) {
+      const product = productBySku.get(line.sku);
+      const next = line.quantity + Number(quantityButton.dataset.quantity);
+      if (next > 0 && next > Math.min(100, product?.stock ?? 0)) {
+        showToast("There is not enough stock for that quantity.");
+        return;
+      }
+      line.quantity = next;
+    }
     cart = cart.filter((item) => item.quantity > 0);
   } else {
     return;
@@ -735,6 +1334,12 @@ document.querySelector("#cartItems").addEventListener("click", (event) => {
 
 document.querySelector("#startCheckout").addEventListener("click", () => {
   if (!cart.length) return;
+  if (!authenticatedUser) {
+    setDrawerOpen(false);
+    openAccountDialog({ afterLogin: true });
+    return;
+  }
+  document.querySelector("#customerEmail").value = authenticatedUser.email;
   renderReview();
   document.querySelector("#checkoutError").hidden = true;
   setDrawerOpen(false);
@@ -779,7 +1384,6 @@ document.querySelector("#checkoutForm").addEventListener("submit", async (event)
         "X-Correlation-ID": createCorrelationId()
       },
       body: JSON.stringify({
-        customer_id: email,
         full_name: formData.get("fullName").toString().trim(),
         phone: formData.get("phone").toString().trim(),
         address: formData.get("address").toString().trim(),
@@ -808,6 +1412,10 @@ document.querySelector("#checkoutForm").addEventListener("submit", async (event)
       email,
       phone: formData.get("phone").toString().trim(),
       payment_method: formData.get("paymentMethod").toString()
+    });
+    loadStorefrontProducts().catch((error) => {
+      console.error("Could not refresh inventory after checkout:", error);
+      showToast("Order placed. Inventory refresh failed; reload the page to see current stock.");
     });
   } catch (error) {
     errorBox.textContent = error.message || "We couldn’t reach the order service. Your bag is saved so you can safely try again.";
@@ -853,14 +1461,25 @@ document.querySelector("#trackForm").addEventListener("submit", (event) => {
 });
 document.querySelector("#myOrdersForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  const data = new FormData(event.currentTarget);
-  loadMyOrders(data.get("email").toString().trim(), data.get("phone").toString().trim());
+  if (authenticatedUser) loadMyOrders(authenticatedUser.email, "");
 });
 document.querySelector("#complaintForm").addEventListener("submit", submitComplaint);
 document.querySelector("#complaintType").addEventListener("change", syncComplaintType);
-document.querySelector("#openMyOrders").addEventListener("click", () => openMyOrders());
+document.querySelector("#accountButton").addEventListener("click", () => openAccountDialog());
+document.querySelector("#openAccountFooter").addEventListener("click", () => openAccountDialog());
+document.querySelector("#accountMode").addEventListener("change", syncAccountMode);
+document.querySelector("#accountForm").addEventListener("submit", submitAccount);
+document.querySelector("#logoutButton").addEventListener("click", logout);
+document.querySelector("#myOrdersButton").addEventListener("click", () => openMyOrders());
 document.querySelector("#openMyOrdersFooter").addEventListener("click", () => openMyOrders());
 document.querySelector("#openComplaints").addEventListener("click", () => openMyOrders());
+document.querySelector("#managementButton").addEventListener("click", openManagement);
+document.querySelector("#managementProductSelect").addEventListener("change", (event) => {
+  populateManagedProduct(inventory.find((product) => product.sku === event.target.value));
+});
+document.querySelector("#productUpdateForm").addEventListener("submit", updateManagedProduct);
+document.querySelector("#productCreateForm").addEventListener("submit", createManagedProduct);
+document.querySelector("#managedUserForm").addEventListener("submit", createManagedUser);
 document.querySelector("#confirmCancelOrder").addEventListener("click", confirmCancelOrder);
 document.querySelector("#openTrack").addEventListener("click", () => openTrackDialog());
 document.querySelector("#deliveryTrack").addEventListener("click", () => openTrackDialog());
@@ -891,6 +1510,18 @@ document.addEventListener("keydown", (event) => {
 
 renderProducts();
 renderCart();
+syncAccountMode();
+(async () => {
+  try {
+    const previousCart = cart;
+    await loadAuthenticatedUser();
+    await loadStorefrontProducts();
+    if (authenticatedUser) switchCartToAuthenticatedUser(previousCart);
+  } catch (error) {
+    console.error("Could not initialize the storefront:", error);
+    showToast(error.message || "Could not load the shop. Please reload.");
+  }
+})();
 try {
   if (localStorage.getItem("maltashop-welcome-dismissed") !== "true") {
     welcomeDialog.showModal();

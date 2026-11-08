@@ -3,12 +3,40 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
+import pytest
+
+
+def make_client(order_module, email="shopper@example.com", role="customer"):
+    client = TestClient(order_module.app)
+    if role == "customer":
+        response = client.post(
+            "/auth/register",
+            json={"email": email, "full_name": "Ari Borg", "password": "test-password-123"},
+        )
+        assert response.status_code == 201
+    else:
+        with order_module.connect() as db:
+            db.execute(
+                "INSERT INTO users (id,email,full_name,password_hash,role,is_active,created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    f"{role}-{email}", email, "Shop Staff",
+                    order_module.hash_password("test-password-123"), role, 1,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+        response = client.post(
+            "/auth/login",
+            json={"email": email, "password": "test-password-123"},
+        )
+        assert response.status_code == 200
+    return client
 
 
 def test_order_creation_and_idempotency(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     headers = {"Idempotency-Key": "test-100", "X-Correlation-ID": "corr-100"}
-    payload = {"customer_id": "c1", "sku": "SKU-1", "quantity": 2}
+    payload = {"sku": "HEADPHONES-01", "quantity": 2}
 
     response = client.post("/orders", json=payload, headers=headers)
     assert response.status_code == 202
@@ -24,18 +52,17 @@ def test_order_creation_and_idempotency(order_module):
 
 
 def test_invalid_order(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     response = client.post(
-        "/orders", json={"customer_id": "c", "sku": "s", "quantity": 0}
+        "/orders", json={"sku": "HEADPHONES-01", "quantity": 0}
     )
     assert response.status_code == 422
 
 
 def test_batch_order_creation_is_atomic_and_idempotent(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     headers = {"Idempotency-Key": "cart-100", "X-Correlation-ID": "corr-cart-100"}
     payload = {
-        "customer_id": "shopper@example.com",
         "items": [
             {"sku": "HEADPHONES-01", "quantity": 1},
             {"sku": "SPEAKER-01", "quantity": 2},
@@ -57,10 +84,9 @@ def test_batch_order_creation_is_atomic_and_idempotent(order_module):
         assert db.execute("SELECT count(*) FROM outbox").fetchone()[0] == 2
 
     changed_payload = {
-        "customer_id": "shopper@example.com",
         "items": [
             {"sku": "HEADPHONES-01", "quantity": 3},
-            {"sku": "NEW-ITEM", "quantity": 1},
+            {"sku": "SPEAKER-01", "quantity": 1},
         ],
     }
     conflict = client.post("/orders/batch", json=changed_payload, headers=headers)
@@ -70,17 +96,16 @@ def test_batch_order_creation_is_atomic_and_idempotent(order_module):
 
 
 def test_batch_retry_with_added_item_is_rejected_atomically(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     headers = {"Idempotency-Key": "cart-added-item"}
     original = {
-        "customer_id": "c1",
-        "items": [{"sku": "SKU-1", "quantity": 1}],
+        "items": [{"sku": "HEADPHONES-01", "quantity": 1}],
     }
     assert client.post("/orders/batch", json=original, headers=headers).status_code == 202
 
     changed = {
         **original,
-        "items": [*original["items"], {"sku": "SKU-2", "quantity": 1}],
+        "items": [*original["items"], {"sku": "SPEAKER-01", "quantity": 1}],
     }
     response = client.post("/orders/batch", json=changed, headers=headers)
 
@@ -91,13 +116,12 @@ def test_batch_retry_with_added_item_is_rejected_atomically(order_module):
 
 
 def test_batch_rejects_duplicate_skus(order_module):
-    response = TestClient(order_module.app).post(
+    response = make_client(order_module).post(
         "/orders/batch",
         json={
-            "customer_id": "c1",
             "items": [
-                {"sku": "SKU-1", "quantity": 1},
-                {"sku": "SKU-1", "quantity": 2},
+                {"sku": "HEADPHONES-01", "quantity": 1},
+                {"sku": "HEADPHONES-01", "quantity": 2},
             ],
         },
     )
@@ -106,12 +130,11 @@ def test_batch_rejects_duplicate_skus(order_module):
 
 
 def test_checkout_saves_customer_details_and_delivery_estimate(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     response = client.post(
         "/orders/batch",
         headers={"Idempotency-Key": "complete-checkout"},
         json={
-            "customer_id": "shopper@example.com",
             "full_name": "Ari Borg",
             "phone": "+356 1234 5678",
             "address": "12 Example Street",
@@ -154,12 +177,11 @@ def test_checkout_saves_customer_details_and_delivery_estimate(order_module):
 
 
 def test_checkout_rejects_incomplete_delivery_details(order_module):
-    response = TestClient(order_module.app).post(
+    response = make_client(order_module).post(
         "/orders/batch",
         json={
-            "customer_id": "shopper@example.com",
             "full_name": "Ari Borg",
-            "items": [{"sku": "SKU-1", "quantity": 1}],
+            "items": [{"sku": "HEADPHONES-01", "quantity": 1}],
         },
     )
 
@@ -194,13 +216,39 @@ def test_existing_database_is_migrated_without_losing_orders(order_module, tmp_p
         ).fetchone()
     assert migrated_order == ("old-customer", "OLD-SKU", 1, 2, 5)
 
+def test_existing_user_role_constraint_is_migrated(order_module, tmp_path):
+    database_path = tmp_path / "old-users.db"
+    with sqlite3.connect(database_path) as db:
+        db.execute(
+            "CREATE TABLE users (id TEXT PRIMARY KEY,email TEXT NOT NULL UNIQUE,full_name TEXT NOT NULL,"
+            "password_hash TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN "
+            "('customer','admin','product_management_officer')),is_active INTEGER NOT NULL DEFAULT 1,"
+            "created_at TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO users VALUES (?,?,?,?,?,?,?)",
+            (
+                "existing-user", "existing@example.test", "Existing User",
+                "legacy-hash", "customer", 1, datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+    order_module.DB = str(database_path)
+    order_module.initialize()
+    with order_module.connect() as db:
+        assert db.execute("SELECT id,role FROM users").fetchone() == ("existing-user", "customer")
+        db.execute(
+            "INSERT INTO users (id,email,full_name,password_hash,role,is_active,created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            ("new-staff", "delivery@example.test", "Delivery", "hash", "order_fulfillment_officer", 1, "now"),
+        )
+
 
 def create_checkout_order(client, idempotency_key, email="shopper@example.com", phone="+356 1234 5678"):
     return client.post(
         "/orders/batch",
         headers={"Idempotency-Key": idempotency_key},
         json={
-            "customer_id": email,
             "full_name": "Ari Borg",
             "phone": phone,
             "address": "12 Example Street",
@@ -215,7 +263,7 @@ def create_checkout_order(client, idempotency_key, email="shopper@example.com", 
 
 
 def test_customer_can_list_orders_without_tracking_id(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     created = create_checkout_order(client, "my-orders-checkout")
     assert created.status_code == 202
 
@@ -236,7 +284,7 @@ def test_customer_can_list_orders_without_tracking_id(order_module):
     }
 
 def test_customer_can_submit_product_and_delivery_complaints(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     create_checkout_order(client, "complaint-checkout")
     orders = client.post(
         "/orders/my",
@@ -281,7 +329,7 @@ def test_customer_can_submit_product_and_delivery_complaints(order_module):
 
 
 def test_complaint_requires_valid_order_credentials_and_order_item(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     create_checkout_order(client, "complaint-validation-checkout")
     correlation_id = client.post(
         "/orders/my",
@@ -295,7 +343,7 @@ def test_complaint_requires_valid_order_credentials_and_order_item(order_module)
         "product_sku": "NOT-IN-ORDER",
         "message": "This product has an issue.",
     }
-    assert client.post("/orders/complaints", json=payload).status_code == 404
+    assert client.post("/orders/complaints", json=payload).status_code == 422
 
     payload["phone"] = "12345678"
     assert client.post("/orders/complaints", json=payload).status_code == 422
@@ -305,44 +353,19 @@ def test_complaint_requires_valid_order_credentials_and_order_item(order_module)
     assert client.post("/orders/complaints", json=payload).status_code == 422
 
 
-def test_customer_order_lookup_accepts_local_and_international_malta_phone(order_module):
-    client = TestClient(order_module.app)
-    create_checkout_order(client, "maltese-phone-format", phone="+356 9912-3456")
-
-    for phone in ("9912 3456", "+356 9912 3456", "00356 9912 3456"):
-        response = client.post(
-            "/orders/my",
-            json={"email": "shopper@example.com", "phone": phone},
-        )
-        assert response.status_code == 200
-        assert len(response.json()["orders"]) == 1
-
-
-def test_customer_order_lookup_requires_matching_email_and_phone(order_module):
-    client = TestClient(order_module.app)
+def test_customers_can_only_see_and_manage_their_own_orders(order_module):
+    client = make_client(order_module)
     created = create_checkout_order(client, "private-order")
-
-    wrong_phone = client.post(
-        "/orders/my",
-        json={"email": "shopper@example.com", "phone": "+356 9999 9999"},
-    )
-    wrong_email = client.post(
-        "/orders/my",
-        json={"email": "other@example.com", "phone": "+356 1234 5678"},
-    )
-
-    assert wrong_phone.status_code == wrong_email.status_code == 200
-    assert wrong_phone.json()["orders"] == []
-    assert wrong_email.json()["orders"] == []
-    cancel_wrong_phone = client.post(
+    other_customer = make_client(order_module, email="other@example.com")
+    other_orders = other_customer.post("/orders/my", json={})
+    assert other_orders.status_code == 200
+    assert other_orders.json()["orders"] == []
+    assert other_customer.get(f"/orders/{created.json()['orders'][0]['order_id']}").status_code == 404
+    cancel_wrong_user = other_customer.post(
         "/orders/my/cancel",
-        json={
-            "email": "shopper@example.com",
-            "phone": "+356 9999 9999",
-            "correlation_id": created.json()["correlation_id"],
-        },
+        json={"correlation_id": created.json()["correlation_id"]},
     )
-    assert cancel_wrong_phone.status_code == 404
+    assert cancel_wrong_user.status_code == 404
     with order_module.connect() as db:
         assert db.execute(
             "SELECT count(*) FROM orders WHERE status='PENDING'"
@@ -364,7 +387,7 @@ def test_order_cancellation_deadline_is_exactly_twelve_hours(order_module):
 
 
 def test_customer_can_cancel_order_within_twelve_hours(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     created = create_checkout_order(client, "cancel-in-time")
     correlation_id = created.json()["correlation_id"]
     cancellation = {
@@ -392,10 +415,13 @@ def test_customer_can_cancel_order_within_twelve_hours(order_module):
             "SELECT count(*) FROM orders WHERE correlation_id=? AND status='CANCELLED'",
             (correlation_id,),
         ).fetchone()[0] == 2
+        assert db.execute(
+            "SELECT stock FROM products WHERE sku='HEADPHONES-01'"
+        ).fetchone()[0] == 25
 
 
 def test_customer_cannot_cancel_order_after_twelve_hours(order_module):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     created = create_checkout_order(client, "cancel-too-late")
     correlation_id = created.json()["correlation_id"]
     with order_module.connect() as db:
@@ -423,15 +449,15 @@ def test_customer_cannot_cancel_order_after_twelve_hours(order_module):
 
 
 def test_order_lookup_returns_404_for_unknown_order(order_module):
-    response = TestClient(order_module.app).get("/orders/missing")
+    response = make_client(order_module).get("/orders/missing")
     assert response.status_code == 404
 
 
 def test_publisher_sends_and_marks_pending_events(order_module, monkeypatch):
-    client = TestClient(order_module.app)
+    client = make_client(order_module)
     response = client.post(
         "/orders",
-        json={"customer_id": "c1", "sku": "SKU-1", "quantity": 2},
+        json={"sku": "HEADPHONES-01", "quantity": 2},
         headers={"Idempotency-Key": "published-order", "X-Correlation-ID": "corr-1"},
     )
     assert response.status_code == 202
@@ -512,3 +538,366 @@ def test_storefront_is_served(order_module):
     response = TestClient(order_module.app).get("/")
     assert response.status_code == 200
     assert "MaltaShop" in response.text
+
+
+def test_authentication_requires_login_and_sets_secure_session_cookie(order_module):
+    anonymous = TestClient(order_module.app)
+    assert anonymous.get("/auth/me").status_code == 401
+    assert anonymous.post("/orders/my", json={}).status_code == 401
+    assert anonymous.post(
+        "/orders", json={"sku": "HEADPHONES-01", "quantity": 1}
+    ).status_code == 401
+
+    registered = anonymous.post(
+        "/auth/register",
+        json={
+            "email": "new-customer@example.com",
+            "full_name": "New Customer",
+            "password": "test-password-123",
+        },
+    )
+    assert registered.status_code == 201
+    assert registered.json()["role"] == "customer"
+    assert "httponly" in registered.headers["set-cookie"].lower()
+    assert anonymous.get("/auth/me").json()["email"] == "new-customer@example.com"
+    assert anonymous.post(
+        "/auth/register",
+        json={
+            "email": "NEW-CUSTOMER@example.com",
+            "full_name": "Duplicate",
+            "password": "test-password-123",
+        },
+    ).status_code == 409
+
+    login = TestClient(order_module.app)
+    assert login.post(
+        "/auth/login",
+        json={"email": "new-customer@example.com", "password": "wrong-password"},
+    ).status_code == 401
+    assert login.post(
+        "/auth/login",
+        json={"email": "NEW-CUSTOMER@example.com", "password": "test-password-123"},
+    ).status_code == 200
+    assert login.post("/auth/logout").status_code == 200
+    assert login.get("/auth/me").status_code == 401
+
+
+def test_initial_admin_bootstrap_requires_valid_credentials(order_module, monkeypatch):
+    monkeypatch.setenv("INITIAL_ADMIN_EMAIL", " owner@example.com ")
+    monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", "configured-admin-password")
+    monkeypatch.setenv("INITIAL_ADMIN_NAME", "Configured Owner")
+    order_module.initialize()
+
+    client = TestClient(order_module.app)
+    login = client.post(
+        "/auth/login",
+        json={"email": "OWNER@example.com", "password": "configured-admin-password"},
+    )
+    assert login.status_code == 200
+    assert login.json()["role"] == "admin"
+    assert login.json()["full_name"] == "Configured Owner"
+
+    monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", "short")
+    with pytest.raises(ValueError, match="10 to 256 characters"):
+        order_module.initialize()
+
+
+def test_demo_accounts_are_only_created_when_enabled(order_module, monkeypatch):
+    with order_module.connect() as db:
+        assert db.execute("SELECT count(*) FROM users").fetchone()[0] == 0
+
+    monkeypatch.setenv("DEMO_ACCOUNTS", "true")
+    order_module.initialize()
+    accounts = {
+        "demo-customer@maltashop.test": ("Demo-Customer-2026!", "customer"),
+        "demo-officer@maltashop.test": ("Demo-Officer-2026!", "product_management_officer"),
+        "demo-inventory@maltashop.test": ("Demo-Inventory-2026!", "inventory_manager"),
+        "demo-fulfillment@maltashop.test": ("Demo-Fulfillment-2026!", "order_fulfillment_officer"),
+        "demo-finance@maltashop.test": ("Demo-Finance-2026!", "finance_officer"),
+        "demo-admin@maltashop.test": ("Demo-Admin-2026!", "admin"),
+    }
+    for email, (password, role) in accounts.items():
+        client = TestClient(order_module.app)
+        login = client.post("/auth/login", json={"email": email, "password": password})
+        assert login.status_code == 200
+        assert login.json()["role"] == role
+
+    with order_module.connect() as db:
+        assert db.execute("SELECT count(*) FROM users").fetchone()[0] == 6
+
+
+def test_stock_decrement_and_failed_batch_rollback(order_module):
+    client = make_client(order_module)
+    with order_module.connect() as db:
+        db.execute("UPDATE products SET stock=0 WHERE sku='SPEAKER-01'")
+
+    failed = client.post(
+        "/orders/batch",
+        headers={"Idempotency-Key": "atomic-stock-failure"},
+        json={
+            "items": [
+                {"sku": "HEADPHONES-01", "quantity": 2},
+                {"sku": "SPEAKER-01", "quantity": 1},
+            ]
+        },
+    )
+    assert failed.status_code == 409
+    with order_module.connect() as db:
+        assert db.execute(
+            "SELECT stock FROM products WHERE sku='HEADPHONES-01'"
+        ).fetchone()[0] == 25
+        assert db.execute("SELECT count(*) FROM orders").fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM outbox").fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM batch_requests").fetchone()[0] == 0
+
+    successful = client.post(
+        "/orders/batch",
+        headers={"Idempotency-Key": "stock-decrement"},
+        json={"items": [{"sku": "HEADPHONES-01", "quantity": 3}]},
+    )
+    assert successful.status_code == 202
+    with order_module.connect() as db:
+        row = db.execute(
+            "SELECT stock FROM products WHERE sku='HEADPHONES-01'"
+        ).fetchone()
+        price_snapshot = db.execute(
+            "SELECT unit_price_cents FROM orders WHERE sku='HEADPHONES-01'"
+        ).fetchone()[0]
+    assert row[0] == 22
+    assert price_snapshot > 0
+
+
+def test_role_permissions_and_product_management(order_module):
+    customer = make_client(order_module)
+    officer = make_client(
+        order_module, email="officer@example.com", role="product_management_officer"
+    )
+    inventory_manager = make_client(
+        order_module, email="inventory@example.com", role="inventory_manager"
+    )
+    admin = make_client(order_module, email="admin@example.com", role="admin")
+
+    assert customer.get("/admin/products").status_code == 403
+    assert officer.get("/admin/products").status_code == 200
+    assert inventory_manager.get("/admin/products").status_code == 200
+    assert officer.get("/admin/users").status_code == 403
+    assert officer.get("/admin/orders").status_code == 403
+    assert inventory_manager.post(
+        "/admin/products",
+        json={
+            "sku": "INVENTORY-CANNOT-CREATE",
+            "name": "Unauthorized product",
+            "category": "Accessories",
+            "price": 12,
+            "image": "https://example.com/product.jpg",
+        },
+    ).status_code == 403
+    assert admin.get("/admin/users").status_code == 200
+    assert admin.get("/admin/orders").status_code == 200
+
+    created = officer.post(
+        "/admin/products",
+        json={
+            "sku": "OFFICER-CREATED-1",
+            "name": "Officer product",
+            "category": "Accessories",
+            "price": 12.34,
+            "image": "https://example.com/product.jpg",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["stock"] == 0
+    assert officer.patch(
+        "/admin/products/OFFICER-CREATED-1",
+        json={"stock": 4},
+    ).status_code == 403
+    assert inventory_manager.patch(
+        "/admin/products/OFFICER-CREATED-1",
+        json={"price": 15.5},
+    ).status_code == 403
+    changed_stock = inventory_manager.patch(
+        "/admin/products/OFFICER-CREATED-1",
+        json={"stock": 4},
+    )
+    assert changed_stock.status_code == 200
+    assert changed_stock.json()["stock"] == 4
+    changed = officer.patch(
+        "/admin/products/OFFICER-CREATED-1",
+        json={"price": 15.5},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["price"] == 15.5
+    assert changed.json()["stock"] == 4
+    assert officer.post(
+        "/admin/users",
+        json={
+            "email": "managed@example.com",
+            "full_name": "Managed User",
+            "password": "managed-password-123",
+            "role": "customer",
+        },
+    ).status_code == 403
+    managed_user = admin.post(
+        "/admin/users",
+        json={
+            "email": "managed@example.com",
+            "full_name": "Managed User",
+            "password": "managed-password-123",
+            "role": "customer",
+        },
+    )
+    assert managed_user.status_code == 201
+    assert managed_user.json()["role"] == "customer"
+    managed_id = managed_user.json()["id"]
+    managed_client = TestClient(order_module.app)
+    assert managed_client.post(
+        "/auth/login",
+        json={"email": "managed@example.com", "password": "managed-password-123"},
+    ).status_code == 200
+    self_admin = next(
+        user for user in admin.get("/admin/users").json()["users"]
+        if user["email"] == "admin@example.com"
+    )
+    assert admin.patch(
+        f"/admin/users/{self_admin['id']}",
+        json={"role": "admin", "is_active": False},
+    ).status_code == 409
+    disabled = admin.patch(
+        f"/admin/users/{managed_id}",
+        json={"role": "customer", "is_active": False},
+    )
+    assert disabled.status_code == 200
+    assert managed_client.get("/auth/me").status_code == 401
+
+
+def test_admin_can_assign_each_staff_role(order_module):
+    admin = make_client(order_module, email="root@example.com", role="admin")
+    roles = (
+        "product_management_officer",
+        "inventory_manager",
+        "order_fulfillment_officer",
+        "finance_officer",
+    )
+    for role in roles:
+        created = admin.post(
+            "/admin/users",
+            json={
+                "email": f"{role}@example.test",
+                "full_name": role.replace("_", " ").title(),
+                "password": "staff-account-password",
+                "role": role,
+            },
+        )
+        assert created.status_code == 201
+        assert created.json()["role"] == role
+        staff_client = TestClient(order_module.app)
+        login = staff_client.post(
+            "/auth/login",
+            json={
+                "email": f"{role}@example.test",
+                "password": "staff-account-password",
+            },
+        )
+        assert login.status_code == 200
+        assert login.json()["role"] == role
+
+
+def test_fulfillment_lifecycle_and_customer_tracking(order_module):
+    customer = make_client(order_module)
+    dispatcher = make_client(
+        order_module, email="delivery@example.com", role="order_fulfillment_officer"
+    )
+    finance = make_client(order_module, email="finance@example.com", role="finance_officer")
+    placed = create_checkout_order(customer, "delivery-lifecycle")
+    correlation_id = placed.json()["correlation_id"]
+    order_id = placed.json()["orders"][0]["order_id"]
+
+    assert customer.get("/staff/fulfillment/orders").status_code == 403
+    assert finance.get("/staff/fulfillment/orders").status_code == 403
+    assert dispatcher.patch(
+        f"/staff/fulfillment/orders/{correlation_id}",
+        json={"status": "DISPATCHED", "facility": "Valletta", "tracking_reference": "MT-100"},
+    ).status_code == 409
+    accepted = dispatcher.patch(
+        f"/staff/fulfillment/orders/{correlation_id}",
+        json={"status": "RECEIVED"},
+    )
+    assert accepted.status_code == 200
+    assert dispatcher.patch(
+        f"/staff/fulfillment/orders/{correlation_id}",
+        json={"status": "DISPATCHED"},
+    ).status_code == 422
+    dispatched = dispatcher.patch(
+        f"/staff/fulfillment/orders/{correlation_id}",
+        json={
+            "status": "DISPATCHED",
+            "facility": "Valletta Delivery Facility",
+            "tracking_reference": "MT-TRACK-123",
+        },
+    )
+    assert dispatched.status_code == 200
+    tracking = customer.get(f"/orders/{order_id}")
+    assert tracking.status_code == 200
+    assert tracking.json()["status"] == "DISPATCHED"
+    assert tracking.json()["delivery_facility"] == "Valletta Delivery Facility"
+    assert tracking.json()["delivery_tracking_id"] == "MT-TRACK-123"
+    assert dispatcher.patch(
+        f"/staff/fulfillment/orders/{correlation_id}",
+        json={"status": "DELIVERED"},
+    ).json()["status"] == "DELIVERED"
+    assert customer.post("/orders/my", json={}).json()["orders"][0]["status"] == "DELIVERED"
+
+
+def test_finance_can_reconcile_payments_and_refunds(order_module):
+    customer = make_client(order_module)
+    finance = make_client(order_module, email="finance@example.com", role="finance_officer")
+    dispatcher = make_client(
+        order_module, email="delivery@example.com", role="order_fulfillment_officer"
+    )
+    placed = create_checkout_order(customer, "finance-reconciliation")
+    first_order = placed.json()["orders"][0]
+    correlation_id = placed.json()["correlation_id"]
+
+    assert customer.get("/staff/finance/summary").status_code == 403
+    assert dispatcher.get("/staff/finance/summary").status_code == 403
+    initial = finance.get("/staff/finance/summary")
+    assert initial.status_code == 200
+    assert initial.json()["summary"]["outstanding"] > 0
+    assert finance.patch(
+        f"/staff/finance/orders/{first_order['order_id']}/payment",
+        json={"payment_status": "PAID"},
+    ).status_code == 200
+    paid = finance.get("/staff/finance/summary").json()
+    assert paid["summary"]["recorded_revenue"] > 0
+
+    assert customer.post(
+        "/orders/my/cancel", json={"correlation_id": correlation_id}
+    ).status_code == 200
+    assert finance.patch(
+        f"/staff/finance/orders/{first_order['order_id']}/payment",
+        json={"payment_status": "REFUNDED"},
+    ).status_code == 200
+    refunded = finance.get("/staff/finance/summary").json()
+    assert refunded["summary"]["refunded"] == first_order["quantity"] * 64
+
+    assert finance.patch(
+        f"/staff/finance/orders/{first_order['order_id']}/payment",
+        json={"payment_status": "PAID"},
+    ).status_code == 409
+
+
+def test_legacy_orders_remain_admin_only(order_module):
+    customer = make_client(order_module)
+    admin = make_client(order_module, email="admin@example.com", role="admin")
+    with order_module.connect() as db:
+        db.execute(
+            "INSERT INTO orders (id,customer_id,sku,quantity,status,correlation_id) "
+            "VALUES ('legacy-order','legacy-customer','OLD-SKU',1,'PENDING','legacy-correlation')"
+        )
+
+    assert customer.post("/orders/my", json={}).json()["orders"] == []
+    assert customer.get("/orders/legacy-order").status_code == 404
+    all_orders = admin.get("/admin/orders")
+    assert all_orders.status_code == 200
+    assert any(order["order_id"] == "legacy-order" for order in all_orders.json()["orders"])
+    assert admin.get("/orders/legacy-order").status_code == 200
