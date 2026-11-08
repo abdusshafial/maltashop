@@ -230,6 +230,7 @@ function cartTotal() {
 function renderCart() {
   const quantity = cartQuantity();
   document.querySelector("#cartCount").textContent = quantity;
+  document.querySelector("#openCart").setAttribute("aria-label", quantity ? `Open cart, ${quantity} ${quantity === 1 ? "item" : "items"}` : "Open cart");
   document.querySelector("#drawerCount").textContent = quantity ? `(${quantity})` : "";
   document.querySelector("#cartSubtotal").textContent = money.format(cartTotal());
   document.querySelector("#cartEmpty").hidden = quantity > 0;
