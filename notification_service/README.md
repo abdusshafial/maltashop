@@ -14,7 +14,21 @@ docker compose ps
 
 When the services are healthy, open the storefront at **http://localhost:8000**. Browse and filter the sample collection, add several products to your bag, place a demo order, and look up its status from the confirmation screen or **Track an order** in the footer. The storefront is served by the Order API, and checkout submits the whole bag as one atomic, idempotent batch.
 
-Checkout uses the email address you enter as the demo customer ID, which is stored with each order. Do not enter real personal information: this prototype has no payment processing, email delivery, or production privacy controls.
+Checkout uses the signed-in customer's account email for order updates. Do not enter real personal information unless you have configured a trusted SMTP sender and understand this prototype's privacy limitations.
+
+### Gmail email delivery
+
+Copy `.env.example` to `.env`, set `SMTP_USER` to the sender's Gmail address,
+and set `SMTP_PASSWORD` to a Google App Password (2-Step Verification must be
+enabled). `SMTP_FROM` defaults to `SMTP_USER`; Gmail SMTP uses TLS on port 587.
+Never use a regular Google account password or commit `.env`. With SMTP
+credentials absent, the worker waits without consuming the durable email queue.
+After setting credentials, restart the worker with `docker compose up -d
+--build notification-worker`. Check `docker compose logs notification-worker`.
+
+The worker sends one email per checkout and sends the acceptance or cancellation
+update when those order changes are committed. SMTP delivery is asynchronous;
+check the worker log for delivery or configuration errors.
 
 PowerShell example:
 
@@ -42,7 +56,7 @@ Order API: `http://localhost:8000/docs`, health: `/health`. RabbitMQ management 
 - Storefront checkout creates all items in one transaction at `POST /orders/batch`; retrying with the same idempotency key does not create duplicates.
 - Correlation ID is carried in HTTP, stored in the order and event, and logged in both processes.
 - Example `Idempotency-Key` protects against duplicate order creation, with conflict on different payload.
-- The notification queue and dead-letter queue are durable. Invalid messages and processing failures are routed to `notification.order_placed.dead` instead of being silently discarded.
+- The notification queue and dead-letter queue are durable. Order confirmation, acceptance, and cancellation events are routed to the notification worker; invalid messages and processing failures go to `notification.order_placed.dead`.
 - The consumer acknowledges a message only after its local SQLite transaction commits, and closes its RabbitMQ connection before retrying after a connection failure.
 
 ## Automated tests

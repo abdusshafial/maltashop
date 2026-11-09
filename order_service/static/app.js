@@ -46,6 +46,7 @@ let favorites = loadFavorites();
 let favoritesOnly = false;
 let motionEnabled = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let activeProductSku = null;
+let reviewAfterLoginSku = null;
 let toastTimer;
 let lastOrderIds = [];
 let lastCustomerDetails = null;
@@ -54,6 +55,10 @@ let pendingCancellation = null;
 let inventory = [];
 let managementUsers = [];
 let checkoutAfterLogin = false;
+const deliveryLocationWatches = new Map();
+let trackLocationPollTimer = null;
+let myOrdersLocationPollTimer = null;
+let trackedOrderId = null;
 
 function loadCart() {
   try {
@@ -158,6 +163,9 @@ function renderProducts() {
         <div>
           <h3>${escapeHtml(product.name)}</h3>
           <p class="product-category">${escapeHtml(product.category)} · ${escapeHtml(product.sku)}</p>
+          ${product.review_count
+            ? `<p class="product-rating" aria-label="${Number(product.average_rating).toFixed(1)} out of 5 from ${product.review_count} reviews"><span aria-hidden="true">★</span> ${Number(product.average_rating).toFixed(1)} <span>(${product.review_count})</span></p>`
+            : '<p class="product-rating is-unrated">Be the first to review</p>'}
           ${product.stock > 0
             ? `<p class="product-stock" aria-label="Available stock: ${product.stock}"><span class="stock-indicator" aria-hidden="true"></span>Available: ${product.stock}</p>`
             : '<p class="product-stock is-out-of-stock"><span class="stock-indicator" aria-hidden="true"></span>Out of stock</p>'}
@@ -211,12 +219,115 @@ function openProductDialog(sku) {
     <div><span>Delivery estimate</span><strong>2–5 working days</strong></div>
     <p>Estimated after checkout, Monday to Friday, across Malta and Gozo. Actual delivery time may vary.</p>
   `;
+  document.querySelector("#productReviewSummary").textContent = "";
+  document.querySelector("#productReviewList").replaceChildren();
+  document.querySelector("#productReviewNotice").textContent = "Loading reviews…";
+  document.querySelector("#productReviewNotice").hidden = false;
+  document.querySelector("#productReviewForm").hidden = true;
+  document.querySelector("#reviewSignIn").hidden = true;
+  document.querySelector("#productReviewError").hidden = true;
   const favoriteButton = document.querySelector("#productDialogFavorite");
   const isSaved = favorites.includes(sku);
   favoriteButton.textContent = isSaved ? "♥ Saved" : "♡ Save";
   favoriteButton.classList.toggle("is-saved", isSaved);
   favoriteButton.setAttribute("aria-pressed", String(isSaved));
   document.querySelector("#productDialog").showModal();
+  loadProductReviews(sku);
+}
+
+async function loadProductReviews(sku) {
+  const notice = document.querySelector("#productReviewNotice");
+  const list = document.querySelector("#productReviewList");
+  const summary = document.querySelector("#productReviewSummary");
+  const form = document.querySelector("#productReviewForm");
+  const signInButton = document.querySelector("#reviewSignIn");
+  const errorBox = document.querySelector("#productReviewError");
+  try {
+    const result = await sendJson(`/products/${encodeURIComponent(sku)}/reviews`, null, "GET");
+    if (activeProductSku !== sku) return;
+    summary.textContent = result.review_count
+      ? `★ ${Number(result.average_rating).toFixed(1)} · ${result.review_count} ${result.review_count === 1 ? "review" : "reviews"}`
+      : "No reviews yet";
+    list.replaceChildren(...result.reviews.map((review) => {
+      const article = document.createElement("article");
+      article.className = "product-review";
+      const heading = document.createElement("div");
+      heading.className = "product-review-heading";
+      const author = document.createElement("strong");
+      author.textContent = review.reviewer;
+      const stars = document.createElement("span");
+      stars.className = "review-stars";
+      stars.setAttribute("aria-label", `${review.rating} out of 5 stars`);
+      stars.textContent = `${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}`;
+      const comment = document.createElement("p");
+      comment.textContent = review.comment;
+      heading.append(author, stars);
+      article.append(heading, comment);
+      return article;
+    }));
+    notice.hidden = result.review_count !== 0;
+    notice.textContent = "No reviews yet. Your experience can be the first.";
+    if (!authenticatedUser) {
+      signInButton.hidden = false;
+      notice.hidden = false;
+      notice.textContent = result.review_count
+        ? "Bought and received this item? Log in to share your review."
+        : "Bought and received this item? Log in to leave the first review.";
+      return;
+    }
+    if (authenticatedUser.role !== "customer") {
+      notice.hidden = false;
+      notice.textContent = "Product reviews are available to customer accounts.";
+      return;
+    }
+    const eligibility = await sendJson(
+      `/products/${encodeURIComponent(sku)}/review-eligibility`,
+      null,
+      "GET"
+    );
+    if (activeProductSku !== sku) return;
+    if (eligibility.review) {
+      notice.hidden = false;
+      notice.textContent = `Your review: ${"★".repeat(eligibility.review.rating)}${"☆".repeat(5 - eligibility.review.rating)} — ${eligibility.review.comment}`;
+    } else if (eligibility.eligible) {
+      notice.hidden = true;
+      form.hidden = false;
+    } else {
+      notice.hidden = false;
+      notice.textContent = eligibility.delivered
+        ? "You have already reviewed this item."
+        : "You can leave a review after this product has been delivered to you.";
+    }
+  } catch (error) {
+    if (activeProductSku !== sku) return;
+    errorBox.textContent = error.message || "Could not load product reviews.";
+    errorBox.hidden = false;
+    notice.textContent = "Reviews could not be loaded. Please try again.";
+  }
+}
+
+async function submitProductReview(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const button = document.querySelector("#submitProductReview");
+  const errorBox = document.querySelector("#productReviewError");
+  errorBox.hidden = true;
+  button.disabled = true;
+  try {
+    await sendJson(`/products/${encodeURIComponent(activeProductSku)}/reviews`, {
+      rating: Number(formData.get("rating")),
+      comment: formData.get("comment").toString().trim()
+    });
+    form.reset();
+    showToast("Thanks for sharing your product review.");
+    await loadProductReviews(activeProductSku);
+  } catch (error) {
+    errorBox.textContent = error.message || "Your review could not be saved.";
+    errorBox.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function cartQuantity() {
@@ -413,6 +524,9 @@ async function submitAccount(event) {
     renderAccountState();
     document.querySelector("#accountDialog").close();
     showToast(`Welcome, ${authenticatedUser.full_name}.`);
+    const reviewSku = reviewAfterLoginSku;
+    reviewAfterLoginSku = null;
+    if (reviewSku) openProductDialog(reviewSku);
     const continueToCheckout = checkoutAfterLogin;
     checkoutAfterLogin = false;
     if (continueToCheckout) document.querySelector("#startCheckout").click();
@@ -571,6 +685,9 @@ function renderFulfillmentOrders(orders) {
       tracking.textContent = `Facility: ${order.facility || "—"} · Tracking: ${order.tracking_reference || "—"}`;
       row.append(tracking);
     }
+    if (order.status === "DISPATCHED") {
+      renderDeliveryLocationControls(order, row);
+    }
 
     const next = {
       PENDING: "RECEIVED",
@@ -615,6 +732,11 @@ function renderFulfillmentOrders(orders) {
             facility: facilityInput?.value.trim() || null,
             tracking_reference: trackingInput?.value.trim() || null
           }, "PATCH");
+          if (next === "DELIVERED") {
+            const watch = deliveryLocationWatches.get(order.correlation_id);
+            if (watch) navigator.geolocation.clearWatch(watch.watchId);
+            deliveryLocationWatches.delete(order.correlation_id);
+          }
           await loadFulfillmentOrders();
           await loadStorefrontProducts();
           showToast(`Order updated: ${statusLabel(next)}.`);
@@ -627,6 +749,134 @@ function renderFulfillmentOrders(orders) {
       row.append(controls);
     }
     container.append(row);
+  }
+}
+
+function renderDeliveryLocationControls(order, row) {
+  const controls = document.createElement("div");
+  controls.className = "delivery-sharing-controls";
+  const message = document.createElement("p");
+  message.className = "delivery-sharing-note";
+  const ownsShare = order.location_shared_by === authenticatedUser?.id;
+  const isLive = order.location_status === "live";
+  if (isLive && !ownsShare) {
+    message.textContent = "Another staff member is currently sharing GPS with this customer.";
+  } else if (isLive) {
+    message.textContent = `Your device GPS is visible to this customer. Last update: ${formatOrderDate(order.location_updated_at)}.`;
+  } else if (order.location_status === "stale") {
+    message.textContent = "The last GPS signal expired. The customer cannot see its old coordinates.";
+  } else {
+    message.textContent = "Share this device’s GPS with the customer only while delivering this order.";
+  }
+  const action = document.createElement("button");
+  action.type = "button";
+  action.className = "button button-outline delivery-sharing-action";
+  action.textContent = ownsShare && isLive ? "Stop GPS sharing" : "Share my live GPS";
+  action.disabled = isLive && !ownsShare;
+  action.addEventListener("click", () => {
+    if (ownsShare && isLive) {
+      stopDeliveryLocationSharing(order, action);
+    } else {
+      startDeliveryLocationSharing(order, action);
+    }
+  });
+  controls.append(message, action);
+  row.append(controls);
+}
+
+function locationShareUrl(correlationId) {
+  return `/staff/fulfillment/orders/${encodeURIComponent(correlationId)}/location`;
+}
+
+function getLocationPermissionError(error) {
+  if (error.code === error.PERMISSION_DENIED) {
+    return "GPS permission was denied. Allow location access in your browser to share delivery GPS.";
+  }
+  if (error.code === error.POSITION_UNAVAILABLE) {
+    return "Your device could not determine its GPS position. Please try again outdoors.";
+  }
+  if (error.code === error.TIMEOUT) {
+    return "GPS took too long to respond. Please try sharing again.";
+  }
+  return "Could not read the GPS position from this device.";
+}
+
+function readCurrentDeviceLocation() {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 20000
+    });
+  });
+}
+
+function locationPayload(position) {
+  return {
+    latitude: position.coords.latitude,
+    longitude: position.coords.longitude,
+    accuracy: position.coords.accuracy
+  };
+}
+
+async function startDeliveryLocationSharing(order, button) {
+  if (!window.isSecureContext || !navigator.geolocation) {
+    showToast("Live GPS needs HTTPS and a device/browser that supports location.");
+    return;
+  }
+  button.disabled = true;
+  try {
+    const position = await readCurrentDeviceLocation();
+    await sendJson(locationShareUrl(order.correlation_id), locationPayload(position), "PUT");
+    const watchId = navigator.geolocation.watchPosition(
+      (nextPosition) => {
+        const watch = deliveryLocationWatches.get(order.correlation_id);
+        if (!watch || watch.sending || Date.now() - watch.lastSentAt < 15000) return;
+        watch.sending = true;
+        sendJson(locationShareUrl(order.correlation_id), locationPayload(nextPosition), "PUT")
+          .then(() => { watch.lastSentAt = Date.now(); })
+          .catch((error) => {
+            console.error("Could not update the shared delivery GPS:", error);
+            showToast(error.message || "GPS update failed. The location will stop showing as live if updates do not resume.");
+          })
+          .finally(() => { watch.sending = false; });
+      },
+      (error) => {
+        const watch = deliveryLocationWatches.get(order.correlation_id);
+        if (!watch) return;
+        showToast(getLocationPermissionError(error));
+        stopDeliveryLocationSharing(order, null);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+    );
+    deliveryLocationWatches.set(order.correlation_id, { watchId, lastSentAt: Date.now(), sending: false });
+    showToast("Live GPS sharing started. The customer can see this device’s location.");
+    await loadFulfillmentOrders().catch((error) => {
+      console.error("Could not refresh the fulfillment list after GPS sharing started:", error);
+      showToast("GPS sharing is active, but the staff order list could not refresh.");
+    });
+  } catch (error) {
+    showToast(error.message || "Could not start live GPS sharing.");
+    button.disabled = false;
+  }
+}
+
+async function stopDeliveryLocationSharing(order, button) {
+  const watch = deliveryLocationWatches.get(order.correlation_id);
+  if (watch) navigator.geolocation.clearWatch(watch.watchId);
+  deliveryLocationWatches.delete(order.correlation_id);
+  if (button) button.disabled = true;
+  try {
+    await sendJson(locationShareUrl(order.correlation_id), undefined, "DELETE");
+    showToast("Live GPS sharing stopped.");
+    await loadFulfillmentOrders().catch((error) => {
+      console.error("Could not refresh the fulfillment list after GPS sharing stopped:", error);
+      showToast("GPS sharing stopped, but the staff order list could not refresh.");
+    });
+  } catch (error) {
+    console.error("Could not stop the server-side delivery GPS share:", error);
+    showToast(`GPS stopped on this device, but the server could not clear the last location: ${error.message || "please retry"}. It will expire automatically.`);
+    if (button) button.disabled = false;
   }
 }
 
@@ -834,6 +1084,9 @@ function openTrackDialog(orderId = "") {
     return;
   }
   const input = document.querySelector("#trackOrderId");
+  clearInterval(trackLocationPollTimer);
+  trackLocationPollTimer = null;
+  trackedOrderId = null;
   input.value = orderId;
   document.querySelector("#trackResult").hidden = true;
   document.querySelector("#trackError").hidden = true;
@@ -858,6 +1111,9 @@ function formatDeliveryRange(order) {
 async function lookupOrder(orderId) {
   const errorBox = document.querySelector("#trackError");
   const result = document.querySelector("#trackResult");
+  clearInterval(trackLocationPollTimer);
+  trackLocationPollTimer = null;
+  trackedOrderId = null;
   errorBox.hidden = true;
   result.hidden = true;
   try {
@@ -880,6 +1136,9 @@ async function lookupOrder(orderId) {
     const deliveryValue = document.createElement("p");
     deliveryValue.textContent = formatDeliveryRange(order);
     result.replaceChildren(heading, id, idValue, item, itemValue, delivery, deliveryValue);
+    const tracker = createDeliveryTracker(order.status, order.delivery_facility, order.live_location);
+    tracker.dataset.trackOrderId = order.order_id;
+    result.append(tracker);
     if (order.delivery_facility || order.delivery_tracking_id) {
       const facility = document.createElement("p");
       facility.innerHTML = "<strong>Delivery facility</strong>";
@@ -892,6 +1151,8 @@ async function lookupOrder(orderId) {
       result.append(facility, facilityValue, tracking, trackingValue);
     }
     result.hidden = false;
+    trackedOrderId = order.order_id;
+    trackLocationPollTimer = setInterval(refreshTrackedOrderLocation, 15000);
   } catch (error) {
     errorBox.textContent = error.message || "We couldn’t look up that order. Please try again.";
     errorBox.hidden = false;
@@ -942,11 +1203,22 @@ function formatOrderDate(value) {
 
 function renderMyOrders(orders) {
   const list = document.querySelector("#myOrdersList");
+  const summary = document.querySelector("#myOrdersSummary");
   list.replaceChildren();
+  summary.hidden = false;
+  const activeOrders = orders.filter(
+    (order) => order.status !== "DELIVERED" && order.status !== "CANCELLED"
+  ).length;
+  const deliveredOrders = orders.filter((order) => order.status === "DELIVERED").length;
+  summary.replaceChildren(
+    createMyOrderStat("Total orders", orders.length),
+    createMyOrderStat("In progress", activeOrders),
+    createMyOrderStat("Delivered", deliveredOrders)
+  );
   if (!orders.length) {
     const empty = document.createElement("p");
     empty.className = "my-orders-empty";
-    empty.textContent = "Your account has no orders yet.";
+    empty.textContent = "No orders just yet. Your next good find will show up here.";
     list.append(empty);
     list.hidden = false;
     return;
@@ -955,48 +1227,80 @@ function renderMyOrders(orders) {
   orders.forEach((order) => {
     const card = document.createElement("article");
     card.className = "my-order-card";
+    card.dataset.correlationId = order.correlation_id;
     const header = document.createElement("div");
     header.className = "my-order-header";
     const title = document.createElement("h3");
     title.textContent = `Order placed ${formatOrderDate(order.created_at)}`;
     const status = document.createElement("span");
-    status.className = `my-order-status${order.status === "CANCELLED" ? " is-cancelled" : ""}`;
+    status.className = `my-order-status${order.status === "CANCELLED" ? " is-cancelled" : order.status === "DELIVERED" ? " is-delivered" : order.status === "DISPATCHED" ? " is-dispatched" : ""}`;
     status.textContent = statusLabel(order.status);
     header.append(title, status);
+
+    const identifiers = document.createElement("div");
+    identifiers.className = "my-order-identifiers";
+    const uniqueOrderIds = [...new Set(order.items.map((item) => item.order_id).filter(Boolean))];
+    const uniqueTrackingIds = [...new Set(
+      order.items.map((item) => item.delivery_tracking_id).filter(Boolean)
+    )];
+    uniqueOrderIds.forEach((value) => identifiers.append(createMyOrderReference("Order ID", value)));
+    uniqueTrackingIds.forEach((value) => identifiers.append(createMyOrderReference("Tracking ID", value)));
+    if (!uniqueTrackingIds.length) {
+      identifiers.append(createMyOrderReference("Tracking ID", "Not assigned"));
+    }
 
     const items = document.createElement("ul");
     items.className = "my-order-items";
     order.items.forEach((item) => {
       const line = document.createElement("li");
       const product = productBySku.get(item.sku);
-      line.textContent = `${item.name || product?.name || item.sku} × ${item.quantity}`;
+      const name = document.createElement("span");
+      name.textContent = item.name || product?.name || item.sku;
+      const quantity = document.createElement("small");
+      quantity.textContent = `× ${item.quantity}`;
+      line.append(name, quantity);
       items.append(line);
     });
 
-    const delivery = document.createElement("p");
+    const delivery = document.createElement("div");
     delivery.className = "my-order-delivery";
-    delivery.textContent = `Estimated delivery: ${order.delivery_min_days}–${order.delivery_max_days} working days`;
-    card.append(header, items, delivery);
-    if (order.delivery_facility || order.delivery_tracking_id) {
-      const tracking = document.createElement("p");
-      tracking.className = "my-order-delivery";
-      tracking.textContent =
-        `Delivery facility: ${order.delivery_facility || "Not assigned"} · ` +
-        `Tracking reference: ${order.delivery_tracking_id || "Not assigned"}`;
-      card.append(tracking);
-    }
+    const estimate = document.createElement("div");
+    estimate.className = "my-order-delivery-detail";
+    const estimateLabel = document.createElement("span");
+    estimateLabel.textContent = "Delivery estimate";
+    const estimateValue = document.createElement("strong");
+    estimateValue.textContent = `${order.delivery_min_days}–${order.delivery_max_days} working days`;
+    estimate.append(estimateLabel, estimateValue);
+    const facility = document.createElement("div");
+    facility.className = "my-order-delivery-detail";
+    const facilityLabel = document.createElement("span");
+    facilityLabel.textContent = "Delivery facility";
+    const facilityValue = document.createElement("strong");
+    facilityValue.textContent = order.delivery_facility || "Not assigned";
+    facility.append(facilityLabel, facilityValue);
+    delivery.append(estimate, facility);
+
+    const details = document.createElement("div");
+    details.className = "my-order-details";
+    details.append(identifiers, items, delivery);
+    const tracker = createDeliveryTracker(order.status, order.delivery_facility, order.live_location);
+    tracker.dataset.correlationId = order.correlation_id;
+    card.append(header, tracker, details);
+
+    const actions = document.createElement("div");
+    actions.className = "my-order-actions";
     const complaintButton = document.createElement("button");
-    complaintButton.className = "button button-outline my-order-cancel";
+    complaintButton.className = "button button-outline my-order-support";
     complaintButton.type = "button";
     complaintButton.textContent = "Report a problem";
     complaintButton.addEventListener("click", () => openComplaint(order));
-    card.append(complaintButton);
+    actions.append(complaintButton);
 
     if (order.status === "CANCELLED") {
       const cancelled = document.createElement("p");
       cancelled.className = "my-order-window";
       cancelled.textContent = "This order has been cancelled.";
-      card.append(cancelled);
+      actions.append(cancelled);
     } else if (order.can_cancel) {
       const deadline = document.createElement("p");
       deadline.className = "my-order-window";
@@ -1006,17 +1310,202 @@ function renderMyOrders(orders) {
       cancelButton.type = "button";
       cancelButton.textContent = "Cancel order";
       cancelButton.addEventListener("click", () => openCancelOrder(order));
-      card.append(deadline, cancelButton);
+      actions.append(deadline, cancelButton);
     } else if (order.status === "PENDING") {
       const closed = document.createElement("p");
       closed.className = "my-order-window";
       closed.textContent = "The 12-hour cancellation window has closed.";
-      card.append(closed);
+      actions.append(closed);
     }
 
+    card.append(actions);
     list.append(card);
   });
   list.hidden = false;
+}
+
+function createDeliveryTracker(status, facility, liveLocation) {
+  const tracker = document.createElement("section");
+  tracker.className = `delivery-tracker${status === "CANCELLED" ? " is-cancelled" : ""}`;
+  tracker.setAttribute("aria-label", "Delivery progress");
+  tracker.dataset.status = status;
+  tracker.dataset.facility = facility || "";
+
+  const heading = document.createElement("div");
+  heading.className = "delivery-tracker-heading";
+  const title = document.createElement("h4");
+  title.textContent = status === "CANCELLED" ? "Delivery stopped" : "Delivery journey";
+  const gps = document.createElement("span");
+  gps.className = "delivery-gps-status";
+  if (liveLocation?.status === "live" && status === "DISPATCHED") {
+    gps.classList.add("is-live");
+  }
+  gps.textContent = status === "CANCELLED"
+    ? "Cancelled"
+    : status === "DELIVERED"
+      ? "Delivered"
+      : status !== "DISPATCHED"
+        ? "GPS after dispatch"
+        : liveLocation?.status === "live"
+          ? "Live GPS"
+          : liveLocation?.status === "stale"
+            ? "GPS signal stale"
+            : liveLocation?.status === "unavailable"
+              ? "GPS refresh failed"
+              : "Waiting for GPS";
+  heading.append(title, gps);
+  tracker.append(heading);
+
+  if (status === "CANCELLED") {
+    const message = document.createElement("p");
+    message.className = "delivery-location-note";
+    message.textContent = "This order was cancelled, so there is no active delivery location.";
+    tracker.append(message);
+    return tracker;
+  }
+
+  const stages = [
+    { status: "PENDING", label: "Order received" },
+    { status: "RECEIVED", label: "Preparing" },
+    { status: "DISPATCHED", label: "Sent to facility" },
+    { status: "DELIVERED", label: "Delivered" }
+  ];
+  const currentStage = Math.max(0, stages.findIndex((stage) => stage.status === status));
+  const progress = document.createElement("ol");
+  progress.className = "delivery-progress";
+  progress.style.setProperty("--delivery-progress", `${(currentStage / (stages.length - 1)) * 100}%`);
+  stages.forEach((stage, index) => {
+    const step = document.createElement("li");
+    if (index < currentStage) step.classList.add("is-complete");
+    if (index === currentStage) {
+      step.classList.add("is-current");
+      step.setAttribute("aria-current", "step");
+    }
+    const marker = document.createElement("span");
+    marker.className = "delivery-progress-marker";
+    marker.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "delivery-progress-label";
+    label.textContent = stage.label;
+    step.append(marker, label);
+    progress.append(step);
+  });
+  tracker.append(progress);
+
+  const currentLocation = document.createElement("p");
+  currentLocation.className = "delivery-location-note";
+  if (status === "DELIVERED") {
+    currentLocation.textContent = "Delivery completed at your address.";
+  } else if (status === "DISPATCHED") {
+    if (liveLocation?.status === "live") {
+      currentLocation.textContent = `Live device position · updated ${formatOrderDate(liveLocation.updated_at)} · accuracy ±${Math.round(liveLocation.accuracy)} m.`;
+      const livePosition = document.createElement("div");
+      livePosition.className = "delivery-live-position";
+      const coordinates = document.createElement("strong");
+      coordinates.textContent = `${Number(liveLocation.latitude).toFixed(5)}, ${Number(liveLocation.longitude).toFixed(5)}`;
+      const mapLink = document.createElement("a");
+      mapLink.href = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(liveLocation.latitude)}&mlon=${encodeURIComponent(liveLocation.longitude)}#map=16/${encodeURIComponent(liveLocation.latitude)}/${encodeURIComponent(liveLocation.longitude)}`;
+      mapLink.target = "_blank";
+      mapLink.rel = "noopener noreferrer";
+      mapLink.textContent = "Open location in map";
+      livePosition.append(coordinates, mapLink);
+      tracker.append(livePosition);
+    } else if (liveLocation?.status === "stale") {
+      currentLocation.textContent = `GPS signal expired. Last update: ${formatOrderDate(liveLocation.updated_at)}. Old coordinates are hidden until sharing resumes.`;
+    } else if (liveLocation?.status === "unavailable") {
+      currentLocation.textContent = "Could not refresh GPS just now. The last location is not being presented as live; check your connection and refresh.";
+    } else {
+      currentLocation.textContent = facility
+        ? `Delivery facility: ${facility}. Waiting for the courier to start GPS sharing from their device.`
+        : "Sent to the delivery facility. Waiting for the courier to start GPS sharing from their device.";
+    }
+  } else if (status === "RECEIVED") {
+    currentLocation.textContent = "Your order is being prepared. GPS sharing becomes available after dispatch.";
+  } else {
+    currentLocation.textContent = "Your order has been received. GPS sharing becomes available after dispatch.";
+  }
+  tracker.append(currentLocation);
+  return tracker;
+}
+
+async function refreshTrackedOrderLocation() {
+  if (!trackedOrderId || !document.querySelector("#trackDialog").open) return;
+  try {
+    const response = await fetch(`/orders/${encodeURIComponent(trackedOrderId)}`);
+    const order = await response.json();
+    if (!response.ok) throw new Error(order.detail || "Could not refresh delivery GPS.");
+    const heading = document.querySelector("#trackResult h3");
+    if (heading) heading.textContent = `Order status: ${statusLabel(order.status)}`;
+    const tracker = document.querySelector("#trackResult .delivery-tracker");
+    if (!tracker) return;
+    tracker.replaceWith(createDeliveryTracker(order.status, order.delivery_facility, order.live_location));
+  } catch (error) {
+    console.error("Could not refresh tracked order GPS:", error);
+    const tracker = document.querySelector("#trackResult .delivery-tracker");
+    if (tracker) {
+      tracker.replaceWith(createDeliveryTracker(
+        tracker.dataset.status,
+        tracker.dataset.facility,
+        { status: "unavailable" }
+      ));
+    }
+  }
+}
+
+async function refreshMyOrderLocations() {
+  if (!document.querySelector("#myOrdersDialog").open || !authenticatedUser) return;
+  try {
+    const response = await fetch("/orders/my", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Could not refresh delivery GPS.");
+    for (const order of result.orders) {
+      const card = [...document.querySelectorAll(".my-order-card")]
+        .find((item) => item.dataset.correlationId === order.correlation_id);
+      const tracker = card?.querySelector(".delivery-tracker");
+      if (tracker) {
+        tracker.replaceWith(createDeliveryTracker(
+          order.status,
+          order.delivery_facility,
+          order.live_location
+        ));
+      }
+    }
+  } catch (error) {
+    console.error("Could not refresh My Orders GPS:", error);
+    document.querySelectorAll(".my-order-card .delivery-tracker").forEach((tracker) => {
+      tracker.replaceWith(createDeliveryTracker(
+        tracker.dataset.status,
+        tracker.dataset.facility,
+        { status: "unavailable" }
+      ));
+    });
+  }
+}
+
+function createMyOrderStat(label, value) {
+  const stat = document.createElement("div");
+  stat.className = "my-orders-stat";
+  const count = document.createElement("strong");
+  count.textContent = value;
+  const caption = document.createElement("span");
+  caption.textContent = label;
+  stat.append(count, caption);
+  return stat;
+}
+
+function createMyOrderReference(label, value) {
+  const reference = document.createElement("div");
+  reference.className = "my-order-reference";
+  const caption = document.createElement("span");
+  caption.textContent = label;
+  const code = document.createElement("code");
+  code.textContent = value;
+  reference.append(caption, code);
+  return reference;
 }
 
 function openComplaint(order) {
@@ -1115,7 +1604,10 @@ function openMyOrders(email = "", phone = "") {
   const dialog = document.querySelector("#myOrdersDialog");
   document.querySelector("#myOrdersError").hidden = true;
   document.querySelector("#myOrdersList").hidden = true;
+  document.querySelector("#myOrdersSummary").hidden = true;
   if (!dialog.open) dialog.showModal();
+  clearInterval(myOrdersLocationPollTimer);
+  myOrdersLocationPollTimer = setInterval(refreshMyOrderLocations, 15000);
   loadMyOrders(authenticatedUser.email, "");
 }
 
@@ -1124,10 +1616,21 @@ async function loadMyOrders(email, phone) {
   const button = document.querySelector("#findMyOrders");
   errorBox.hidden = true;
   document.querySelector("#myOrdersList").hidden = true;
+  document.querySelector("#myOrdersSummary").hidden = true;
   button.disabled = true;
   button.classList.add("is-busy");
-  button.textContent = "Looking for your orders…";
+  button.innerHTML = '<span aria-hidden="true">↻</span> Updating your orders…';
   activeMyOrdersCredentials = { email, phone };
+  for (const [correlationId, watch] of deliveryLocationWatches) {
+    navigator.geolocation.clearWatch(watch.watchId);
+    try {
+      await sendJson(locationShareUrl(correlationId), undefined, "DELETE");
+    } catch (error) {
+      console.error("Could not clear GPS sharing during logout:", error);
+      showToast("This device stopped GPS, but the last location may remain visible for up to 2 minutes.");
+    }
+  }
+  deliveryLocationWatches.clear();
   try {
     const response = await fetch("/orders/my", {
       method: "POST",
@@ -1144,7 +1647,7 @@ async function loadMyOrders(email, phone) {
   } finally {
     button.disabled = false;
     button.classList.remove("is-busy");
-    button.innerHTML = 'Find my orders <span aria-hidden="true">→</span>';
+    button.innerHTML = '<span aria-hidden="true">↻</span> Refresh orders';
   }
 }
 
@@ -1436,6 +1939,15 @@ document.querySelectorAll("dialog").forEach((dialog) => {
     if (event.target === dialog) dialog.close();
   });
 });
+document.querySelector("#trackDialog").addEventListener("close", () => {
+  clearInterval(trackLocationPollTimer);
+  trackLocationPollTimer = null;
+  trackedOrderId = null;
+});
+document.querySelector("#myOrdersDialog").addEventListener("close", () => {
+  clearInterval(myOrdersLocationPollTimer);
+  myOrdersLocationPollTimer = null;
+});
 
 const welcomeDialog = document.querySelector("#welcomeDialog");
 function closeWelcomeDialog() {
@@ -1465,6 +1977,12 @@ document.querySelector("#myOrdersForm").addEventListener("submit", (event) => {
   if (authenticatedUser) loadMyOrders(authenticatedUser.email, "");
 });
 document.querySelector("#complaintForm").addEventListener("submit", submitComplaint);
+document.querySelector("#productReviewForm").addEventListener("submit", submitProductReview);
+document.querySelector("#reviewSignIn").addEventListener("click", () => {
+  reviewAfterLoginSku = activeProductSku;
+  document.querySelector("#productDialog").close();
+  openAccountDialog();
+});
 document.querySelector("#complaintType").addEventListener("change", syncComplaintType);
 document.querySelector("#accountButton").addEventListener("click", () => openAccountDialog());
 document.querySelector("#openAccountFooter").addEventListener("click", () => openAccountDialog());

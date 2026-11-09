@@ -14,6 +14,12 @@ DB = os.getenv('ORDER_DB', str(PROJECT_ROOT / 'data' / 'orders.db'))
 RABBIT = os.getenv('RABBITMQ_HOST', 'rabbitmq')
 MIN_DELIVERY_DAYS = 2
 MAX_DELIVERY_DAYS = 5
+LOCATION_STALE_AFTER = timedelta(minutes=2)
+NOTIFICATION_ROUTING_KEYS = {
+    'OrderPlaced': 'order.placed',
+    'OrderAccepted': 'order.accepted',
+    'OrderCancelled': 'order.cancelled',
+}
 SESSION_COOKIE = 'maltashop_session'
 SESSION_DAYS = 30
 PASSWORD_ITERATIONS = 310_000
@@ -85,6 +91,11 @@ class FulfillmentUpdateIn(BaseModel):
             raise ValueError('Enter the delivery facility and tracking reference before dispatch')
         return self
 
+class DeliveryLocationIn(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    accuracy: float = Field(ge=0, le=10000)
+
 class PaymentUpdateIn(BaseModel):
     payment_status: str = Field(pattern='^(PAID|REFUNDED)$')
 
@@ -126,6 +137,17 @@ class OrderComplaintIn(MyOrdersIn):
             raise ValueError('Describe your complaint in at least 10 characters')
         return self
 
+class ProductReviewIn(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comment: str = Field(min_length=3, max_length=1000)
+
+    @model_validator(mode='after')
+    def normalize_comment(self):
+        self.comment = self.comment.strip()
+        if len(self.comment) < 3:
+            raise ValueError('Write at least 3 characters in your review')
+        return self
+
 @contextmanager
 def connect():
     conn = sqlite3.connect(DB, timeout=10)
@@ -139,6 +161,63 @@ def connect():
 
 def normalize_email(email: str) -> str:
     return email.strip().casefold()
+
+def location_is_fresh(updated_at: str, now: datetime | None = None) -> bool:
+    updated = datetime.fromisoformat(updated_at)
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    return current - updated <= LOCATION_STALE_AFTER
+
+def delivery_location_response(row, now: datetime | None = None) -> dict | None:
+    if not row:
+        return None
+    result = {
+        'status': 'live' if location_is_fresh(row[3], now) else 'stale',
+        'updated_at': row[3],
+    }
+    if result['status'] == 'live':
+        result.update({
+            'latitude': row[0],
+            'longitude': row[1],
+            'accuracy': row[2],
+        })
+    return result
+
+def enqueue_order_notification(
+    db: sqlite3.Connection,
+    event_type: str,
+    correlation_id: str,
+    recipient_email: str,
+    customer_name: str,
+    items: list[dict],
+    occurred_at: str,
+) -> None:
+    event_id = str(uuid.uuid4())
+    order_ids = [item['order_id'] for item in items]
+    payload = {
+        'event_id': event_id,
+        'type': event_type,
+        'order_id': order_ids[0],
+        'order_ids': order_ids,
+        'recipient_email': recipient_email,
+        'customer_name': customer_name,
+        'items': [
+            {
+                'order_id': item['order_id'],
+                'sku': item['sku'],
+                'name': item['name'],
+                'quantity': item['quantity'],
+            }
+            for item in items
+        ],
+        'correlation_id': correlation_id,
+        'occurred_at': occurred_at,
+    }
+    db.execute(
+        'INSERT INTO outbox (event_id,payload,published) VALUES (?,?,0)',
+        (event_id, json.dumps(payload)),
+    )
 
 def hash_password(password: str, salt: bytes | None = None) -> str:
     actual_salt = salt or secrets.token_bytes(16)
@@ -211,10 +290,18 @@ def public_user(user: dict) -> dict:
         'full_name': user['full_name'], 'role': user['role']
     }
 
+def new_tracking_id() -> str:
+    return f"MT-{uuid.uuid4().hex.upper()}"
+
 def initialize():
     os.makedirs(os.path.dirname(DB) or '.', exist_ok=True)
     with connect() as db:
         db.execute('CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, sku TEXT NOT NULL, quantity INTEGER NOT NULL, status TEXT NOT NULL, correlation_id TEXT NOT NULL)')
+        db.execute(
+            'CREATE TABLE IF NOT EXISTS delivery_locations ('
+            'correlation_id TEXT PRIMARY KEY, latitude REAL NOT NULL, longitude REAL NOT NULL, '
+            'accuracy REAL NOT NULL, updated_at TEXT NOT NULL, shared_by TEXT NOT NULL)'
+        )
         db.execute('CREATE TABLE IF NOT EXISTS outbox (event_id TEXT PRIMARY KEY, payload TEXT NOT NULL, published INTEGER NOT NULL DEFAULT 0)')
         db.execute('CREATE TABLE IF NOT EXISTS batch_requests (idempotency_key TEXT PRIMARY KEY, payload TEXT NOT NULL)')
         db.execute(
@@ -256,6 +343,16 @@ def initialize():
             'id TEXT PRIMARY KEY, correlation_id TEXT NOT NULL, complaint_type TEXT NOT NULL, '
             'product_sku TEXT, message TEXT NOT NULL, created_at TEXT NOT NULL)'
         )
+        db.execute(
+            'CREATE TABLE IF NOT EXISTS product_reviews ('
+            'id TEXT PRIMARY KEY, user_id TEXT NOT NULL, product_sku TEXT NOT NULL, '
+            'rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), comment TEXT NOT NULL, '
+            'created_at TEXT NOT NULL, UNIQUE(user_id,product_sku))'
+        )
+        db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_product_reviews_sku_created '
+            'ON product_reviews(product_sku,created_at DESC)'
+        )
         columns = {row[1] for row in db.execute('PRAGMA table_info(orders)')}
         new_columns = {
             'full_name': "TEXT NOT NULL DEFAULT ''",
@@ -278,6 +375,14 @@ def initialize():
         for column, definition in new_columns.items():
             if column not in columns:
                 db.execute(f'ALTER TABLE orders ADD COLUMN {column} {definition}')
+        untracked_orders = db.execute(
+            "SELECT id FROM orders WHERE delivery_tracking_id=''"
+        ).fetchall()
+        for (order_id,) in untracked_orders:
+            db.execute(
+                'UPDATE orders SET delivery_tracking_id=? WHERE id=?',
+                (new_tracking_id(), order_id)
+            )
         db.execute('CREATE INDEX IF NOT EXISTS idx_orders_user_created ON orders(user_id,created_at)')
         db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)')
         seed_path = Path(__file__).parent / 'catalog_seed.json'
@@ -444,8 +549,92 @@ PRODUCT_SELECT = 'SELECT sku,name,category,price_cents,stock,tag,image,descripti
 @app.get('/products')
 def list_products():
     with connect() as db:
-        rows = db.execute(PRODUCT_SELECT + ' WHERE active=1 ORDER BY name,sku').fetchall()
-    return {'products': [product_response(row) for row in rows]}
+        rows = db.execute(
+            'SELECT p.sku,p.name,p.category,p.price_cents,p.stock,p.tag,p.image,p.description,p.active,'
+            'COALESCE(AVG(r.rating),0),COUNT(r.id) '
+            'FROM products p LEFT JOIN product_reviews r ON r.product_sku=p.sku '
+            'WHERE p.active=1 GROUP BY p.sku ORDER BY p.name,p.sku'
+        ).fetchall()
+    return {'products': [
+        {**product_response(row[:9]), 'average_rating': row[9], 'review_count': row[10]}
+        for row in rows
+    ]}
+
+@app.get('/products/{sku}/reviews')
+def list_product_reviews(sku: str):
+    with connect() as db:
+        rows = db.execute(
+            'SELECT r.rating,r.comment,r.created_at,u.full_name '
+            'FROM product_reviews r JOIN users u ON u.id=r.user_id '
+            'WHERE r.product_sku=? ORDER BY r.created_at DESC,r.id DESC',
+            (sku,)
+        ).fetchall()
+    reviews = [
+        {'rating': row[0], 'comment': row[1], 'created_at': row[2], 'reviewer': 'Verified customer'}
+        for row in rows
+    ]
+    return {
+        'reviews': reviews,
+        'review_count': len(reviews),
+        'average_rating': round(sum(review['rating'] for review in reviews) / len(reviews), 1)
+        if reviews else 0,
+    }
+
+@app.get('/products/{sku}/review-eligibility')
+def product_review_eligibility(sku: str, user: dict = Depends(get_current_user)):
+    if user['role'] != 'customer':
+        raise HTTPException(403, 'Only customer accounts can leave product reviews')
+    with connect() as db:
+        purchased = db.execute(
+            "SELECT 1 FROM orders WHERE user_id=? AND sku=? AND status='DELIVERED' LIMIT 1",
+            (user['id'], sku)
+        ).fetchone()
+        review = db.execute(
+            'SELECT rating,comment,created_at FROM product_reviews WHERE user_id=? AND product_sku=?',
+            (user['id'], sku)
+        ).fetchone()
+    return {
+        'eligible': bool(purchased) and review is None,
+        'delivered': bool(purchased),
+        'review': (
+            {'rating': review[0], 'comment': review[1], 'created_at': review[2]}
+            if review else None
+        ),
+    }
+
+@app.post(
+    '/products/{sku}/reviews',
+    status_code=201,
+    dependencies=[Depends(require_same_origin)],
+)
+def create_product_review(
+    sku: str,
+    body: ProductReviewIn,
+    user: dict = Depends(get_current_user),
+):
+    if user['role'] != 'customer':
+        raise HTTPException(403, 'Only customer accounts can leave product reviews')
+    review_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc).isoformat()
+    try:
+        with connect() as db:
+            delivered_order = db.execute(
+                "SELECT 1 FROM orders WHERE user_id=? AND sku=? AND status='DELIVERED' LIMIT 1",
+                (user['id'], sku)
+            ).fetchone()
+            if not delivered_order:
+                raise HTTPException(403, 'You can review a product after its order is delivered')
+            db.execute(
+                'INSERT INTO product_reviews (id,user_id,product_sku,rating,comment,created_at) '
+                'VALUES (?,?,?,?,?,?)',
+                (review_id, user['id'], sku, body.rating, body.comment, created_at)
+            )
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(409, 'You have already reviewed this product') from exc
+    return {
+        'id': review_id, 'rating': body.rating, 'comment': body.comment,
+        'created_at': created_at, 'reviewer': 'Verified customer',
+    }
 
 @app.get('/admin/users')
 def list_users(_admin: dict = Depends(require_roles('admin'))):
@@ -575,6 +764,18 @@ def list_fulfillment_orders(_staff: dict = Depends(require_roles('admin', 'order
             'status,correlation_id,created_at,delivery_facility,delivery_tracking_id '
             'FROM orders ORDER BY created_at,id'
         ).fetchall()
+        location_ids = list(dict.fromkeys(row[11] for row in rows))
+        location_rows = {}
+        if location_ids:
+            placeholders = ','.join('?' for _ in location_ids)
+            location_rows = {
+                row[0]: row[1:]
+                for row in db.execute(
+                    'SELECT correlation_id,latitude,longitude,accuracy,updated_at,shared_by '
+                    f'FROM delivery_locations WHERE correlation_id IN ({placeholders})',
+                    location_ids,
+                ).fetchall()
+            }
     grouped = {}
     for row in rows:
         if row[10] == 'CANCELLED':
@@ -591,6 +792,12 @@ def list_fulfillment_orders(_staff: dict = Depends(require_roles('admin', 'order
         shipment['items'].append({
             'sku': row[7], 'name': row[8] or row[7], 'quantity': row[9],
         })
+    for correlation_id, shipment in grouped.items():
+        location_row = location_rows.get(correlation_id)
+        location = delivery_location_response(location_row)
+        shipment['location_status'] = location['status'] if location else 'not_shared'
+        shipment['location_updated_at'] = location['updated_at'] if location else None
+        shipment['location_shared_by'] = location_row[4] if location_row else None
     return {'orders': list(grouped.values())}
 
 @app.patch('/staff/fulfillment/orders/{correlation_id}', dependencies=[Depends(require_same_origin)])
@@ -602,7 +809,9 @@ def update_fulfillment(
     previous_status = {'RECEIVED': 'PENDING', 'DISPATCHED': 'RECEIVED', 'DELIVERED': 'DISPATCHED'}[body.status]
     with connect() as db:
         rows = db.execute(
-            'SELECT id,status FROM orders WHERE correlation_id=?', (correlation_id,)
+            'SELECT id,status,customer_id,full_name,sku,product_name,quantity '
+            'FROM orders WHERE correlation_id=?',
+            (correlation_id,),
         ).fetchall()
         if not rows:
             raise HTTPException(404, 'Order not found')
@@ -611,20 +820,111 @@ def update_fulfillment(
         order_ids = [row[0] for row in rows]
         placeholders = ','.join('?' for _ in order_ids)
         db.execute(
-            f'UPDATE orders SET status=?,delivery_facility=?,delivery_tracking_id=? '
+            f'UPDATE orders SET status=?,'
+            'delivery_facility=CASE WHEN ?=? THEN ? ELSE delivery_facility END,'
+            'delivery_tracking_id=CASE WHEN ?=? THEN ? ELSE delivery_tracking_id END '
             f'WHERE id IN ({placeholders}) AND status=?',
             (
                 body.status,
-                body.facility if body.status == 'DISPATCHED' else '',
-                body.tracking_reference if body.status == 'DISPATCHED' else '',
+                body.status, 'DISPATCHED', body.facility,
+                body.status, 'DISPATCHED', body.tracking_reference,
                 *order_ids, previous_status,
             ),
         )
+        if body.status == 'RECEIVED':
+            enqueue_order_notification(
+                db,
+                'OrderAccepted',
+                correlation_id,
+                rows[0][2],
+                rows[0][3],
+                [
+                    {
+                        'order_id': row[0],
+                        'sku': row[4],
+                        'name': row[5] or row[4],
+                        'quantity': row[6],
+                    }
+                    for row in rows
+                ],
+                datetime.now(timezone.utc).isoformat(),
+            )
+        if body.status == 'DELIVERED':
+            db.execute(
+                'DELETE FROM delivery_locations WHERE correlation_id=?',
+                (correlation_id,),
+            )
     log.info(json.dumps({
         'level': 'INFO', 'service': 'orders', 'event': 'fulfillment_status_updated',
         'correlation_id': correlation_id, 'status': body.status, 'staff_id': staff['id'],
     }))
     return {'correlation_id': correlation_id, 'status': body.status}
+
+@app.put(
+    '/staff/fulfillment/orders/{correlation_id}/location',
+    dependencies=[Depends(require_same_origin)],
+)
+def update_delivery_location(
+    correlation_id: str,
+    body: DeliveryLocationIn,
+    staff: dict = Depends(require_roles('admin', 'order_fulfillment_officer')),
+):
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        rows = db.execute(
+            'SELECT status FROM orders WHERE correlation_id=?',
+            (correlation_id,),
+        ).fetchall()
+        if not rows:
+            raise HTTPException(404, 'Order not found')
+        if any(row[0] != 'DISPATCHED' for row in rows):
+            raise HTTPException(409, 'Live GPS sharing is available only for dispatched orders')
+
+        stale_before = (datetime.now(timezone.utc) - LOCATION_STALE_AFTER).isoformat()
+        updated = db.execute(
+            'INSERT INTO delivery_locations '
+            '(correlation_id,latitude,longitude,accuracy,updated_at,shared_by) '
+            'VALUES (?,?,?,?,?,?) '
+            'ON CONFLICT(correlation_id) DO UPDATE SET latitude=excluded.latitude,'
+            'longitude=excluded.longitude,accuracy=excluded.accuracy,'
+            'updated_at=excluded.updated_at,shared_by=excluded.shared_by '
+            'WHERE delivery_locations.shared_by=excluded.shared_by '
+            'OR delivery_locations.updated_at<=?',
+            (
+                correlation_id, body.latitude, body.longitude, body.accuracy,
+                now, staff['id'], stale_before,
+            ),
+        ).rowcount
+        if not updated:
+            raise HTTPException(409, 'Another staff member is currently sharing GPS for this order')
+    return {'status': 'live', 'updated_at': now}
+
+@app.delete(
+    '/staff/fulfillment/orders/{correlation_id}/location',
+    dependencies=[Depends(require_same_origin)],
+)
+def stop_delivery_location(
+    correlation_id: str,
+    staff: dict = Depends(require_roles('admin', 'order_fulfillment_officer')),
+):
+    with connect() as db:
+        order = db.execute(
+            'SELECT 1 FROM orders WHERE correlation_id=? LIMIT 1',
+            (correlation_id,),
+        ).fetchone()
+        if not order:
+            raise HTTPException(404, 'Order not found')
+        current = db.execute(
+            'SELECT shared_by FROM delivery_locations WHERE correlation_id=?',
+            (correlation_id,),
+        ).fetchone()
+        if current and current[0] != staff['id']:
+            raise HTTPException(403, 'Only the staff member sharing this GPS can stop it')
+        db.execute(
+            'DELETE FROM delivery_locations WHERE correlation_id=? AND shared_by=?',
+            (correlation_id, staff['id']),
+        )
+    return {'status': 'stopped'}
 
 @app.get('/staff/finance/summary')
 def finance_summary(_finance: dict = Depends(require_roles('admin', 'finance_officer'))):
@@ -701,7 +1001,14 @@ def create_order(body: OrderIn, user: dict = Depends(get_current_user),
     cid = x_correlation_id or str(uuid.uuid4())
     oid = idempotency_key or str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
-    payload = {'event_id':str(uuid.uuid4()), 'type':'OrderPlaced', 'order_id':oid, 'customer_id':user['email'], 'sku':body.sku, 'quantity':body.quantity, 'correlation_id':cid, 'occurred_at':created_at}
+    payload = {
+        'event_id': str(uuid.uuid4()), 'type': 'OrderPlaced', 'order_id': oid,
+        'customer_id': user['email'], 'recipient_email': user['email'],
+        'customer_name': user['full_name'],
+        'items': [{'order_id': oid, 'sku': body.sku, 'name': body.sku, 'quantity': body.quantity}],
+        'sku': body.sku, 'quantity': body.quantity,
+        'correlation_id': cid, 'occurred_at': created_at,
+    }
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         existing = db.execute('SELECT id,correlation_id,status,customer_id,sku,quantity FROM orders WHERE id=?',(oid,)).fetchone()
@@ -719,9 +1026,9 @@ def create_order(body: OrderIn, user: dict = Depends(get_current_user),
         if not changed:
             raise HTTPException(409, 'There is not enough stock for this product')
         db.execute(
-            'INSERT INTO orders (id,customer_id,user_id,sku,product_name,product_category,unit_price_cents,quantity,status,correlation_id,created_at,delivery_min_days,delivery_max_days) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO orders (id,customer_id,user_id,sku,product_name,product_category,unit_price_cents,quantity,status,correlation_id,created_at,delivery_min_days,delivery_max_days,delivery_tracking_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             (oid,user['email'],user['id'],body.sku,product[1],product[2],product[3],body.quantity,
-             'PENDING',cid,created_at,MIN_DELIVERY_DAYS,MAX_DELIVERY_DAYS)
+             'PENDING',cid,created_at,MIN_DELIVERY_DAYS,MAX_DELIVERY_DAYS,new_tracking_id())
         )
         db.execute('INSERT INTO outbox VALUES (?,?,0)',(payload['event_id'],json.dumps(payload)))
     log.info(json.dumps({'level':'INFO','service':'orders','event':'order_created','order_id':oid,'correlation_id':cid}))
@@ -804,24 +1111,16 @@ def create_order_batch(body: OrderBatchIn, user: dict = Depends(get_current_user
                 raise HTTPException(409, f'Not enough stock for {item.sku}')
 
         for item, oid, product in pending_items:
-
-            event_id = str(uuid.uuid4())
-            payload = {
-                'event_id': event_id, 'type': 'OrderPlaced', 'order_id': oid,
-                'customer_id': user['email'], 'sku': item.sku, 'quantity': item.quantity,
-                'correlation_id': cid, 'occurred_at': created_at
-            }
             db.execute(
-                'INSERT INTO orders (id,customer_id,user_id,sku,product_name,product_category,unit_price_cents,quantity,status,correlation_id,full_name,phone,address,city,postal_code,payment_method,created_at,delivery_min_days,delivery_max_days) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                'INSERT INTO orders (id,customer_id,user_id,sku,product_name,product_category,unit_price_cents,quantity,status,correlation_id,full_name,phone,address,city,postal_code,payment_method,created_at,delivery_min_days,delivery_max_days,delivery_tracking_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 (
                     oid, user['email'], user['id'], item.sku, product[1], product[2], product[3],
                     item.quantity, 'PENDING', cid,
                     body.full_name or '', body.phone or '', body.address or '',
                     body.city or '', body.postal_code or '', body.payment_method,
-                    created_at, MIN_DELIVERY_DAYS, MAX_DELIVERY_DAYS
+                    created_at, MIN_DELIVERY_DAYS, MAX_DELIVERY_DAYS, new_tracking_id()
                 )
             )
-            db.execute('INSERT INTO outbox VALUES (?,?,0)', (event_id, json.dumps(payload)))
             earliest_delivery, latest_delivery = delivery_dates(created_at)
             orders.append({
                 'order_id': oid, 'sku': item.sku, 'quantity': item.quantity,
@@ -830,6 +1129,24 @@ def create_order_batch(body: OrderBatchIn, user: dict = Depends(get_current_user
                 'delivery_max_days': MAX_DELIVERY_DAYS,
                 'earliest_delivery': earliest_delivery, 'latest_delivery': latest_delivery
             })
+        if pending_items:
+            enqueue_order_notification(
+                db,
+                'OrderPlaced',
+                cid,
+                user['email'],
+                user['full_name'],
+                [
+                    {
+                        'order_id': oid,
+                        'sku': item.sku,
+                        'name': product[1],
+                        'quantity': item.quantity,
+                    }
+                    for item, oid, product in pending_items
+                ],
+                created_at,
+            )
 
     log.info(json.dumps({
         'level': 'INFO', 'service': 'orders', 'event': 'order_batch_created',
@@ -846,6 +1163,18 @@ def list_my_orders(_body: MyOrdersIn, user: dict = Depends(get_current_user)):
             'FROM orders WHERE user_id=? ORDER BY created_at DESC,id',
             (user['id'],)
         ).fetchall()
+        correlation_ids = list(dict.fromkeys(row[4] for row in rows))
+        location_rows = {}
+        if correlation_ids:
+            placeholders = ','.join('?' for _ in correlation_ids)
+            location_rows = {
+                row[0]: row[1:]
+                for row in db.execute(
+                    'SELECT correlation_id,latitude,longitude,accuracy,updated_at '
+                    f'FROM delivery_locations WHERE correlation_id IN ({placeholders})',
+                    correlation_ids,
+                ).fetchall()
+            }
 
     grouped = {}
     for row in rows:
@@ -862,10 +1191,13 @@ def list_my_orders(_body: MyOrdersIn, user: dict = Depends(get_current_user)):
                 'delivery_max_days': row[7],
                 'delivery_facility': row[10],
                 'delivery_tracking_id': row[11],
+                'live_location': delivery_location_response(location_rows.get(row[4])),
                 'items': [],
             }
             grouped[row[4]] = order
         order['items'].append({
+            'order_id': row[0],
+            'delivery_tracking_id': row[11],
             'sku': row[1],
             'name': row[9] or row[1],
             'quantity': row[2],
@@ -881,7 +1213,8 @@ def list_my_orders(_body: MyOrdersIn, user: dict = Depends(get_current_user)):
 def cancel_my_order(body: CancelOrderIn, user: dict = Depends(get_current_user)):
     with connect() as db:
         rows = db.execute(
-            'SELECT id,status,created_at,sku,quantity FROM orders '
+            'SELECT id,status,created_at,sku,quantity,customer_id,full_name,product_name '
+            'FROM orders '
             'WHERE correlation_id=? AND user_id=?',
             (body.correlation_id, user['id'])
         ).fetchall()
@@ -900,6 +1233,10 @@ def cancel_my_order(body: CancelOrderIn, user: dict = Depends(get_current_user))
             f"UPDATE orders SET status='CANCELLED' WHERE id IN ({placeholders}) AND status='PENDING'",
             order_ids
         )
+        db.execute(
+            'DELETE FROM delivery_locations WHERE correlation_id=?',
+            (body.correlation_id,),
+        )
         updated_count = db.execute(
             f"SELECT count(*) FROM orders WHERE id IN ({placeholders}) AND status='CANCELLED'",
             order_ids
@@ -908,6 +1245,23 @@ def cancel_my_order(body: CancelOrderIn, user: dict = Depends(get_current_user))
             raise HTTPException(409, 'This order can no longer be cancelled')
         for row in rows:
             db.execute('UPDATE products SET stock=stock+? WHERE sku=?', (row[4], row[3]))
+        enqueue_order_notification(
+            db,
+            'OrderCancelled',
+            body.correlation_id,
+            rows[0][5],
+            rows[0][6],
+            [
+                {
+                    'order_id': row[0],
+                    'sku': row[3],
+                    'name': row[7] or row[3],
+                    'quantity': row[4],
+                }
+                for row in rows
+            ],
+            datetime.now(timezone.utc).isoformat(),
+        )
 
     log.info(json.dumps({
         'level': 'INFO', 'service': 'orders', 'event': 'order_cancelled',
@@ -944,16 +1298,28 @@ def create_order_complaint(body: OrderComplaintIn, user: dict = Depends(get_curr
 
 @app.get('/orders/{order_id}')
 def get_order(order_id: str, user: dict = Depends(get_current_user)):
+    query = (
+        'SELECT id,customer_id,sku,quantity,status,correlation_id,created_at,delivery_min_days,'
+        'delivery_max_days,payment_method,user_id,product_name,delivery_facility,delivery_tracking_id '
+        'FROM orders WHERE (id=? OR delivery_tracking_id=?)'
+    )
+    parameters: tuple[str, ...] = (order_id, order_id)
+    if user['role'] not in ('admin', 'order_fulfillment_officer', 'finance_officer'):
+        query += ' AND user_id=?'
+        parameters += (user['id'],)
+    query += ' ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END LIMIT 1'
+    parameters += (order_id,)
     with connect() as db:
-        row = db.execute(
-            'SELECT id,customer_id,sku,quantity,status,correlation_id,created_at,delivery_min_days,'
-            'delivery_max_days,payment_method,user_id,product_name,delivery_facility,delivery_tracking_id '
-            'FROM orders WHERE id=?',
-            (order_id,)
-        ).fetchone()
+        row = db.execute(query, parameters).fetchone()
+        location_row = (
+            db.execute(
+                'SELECT latitude,longitude,accuracy,updated_at FROM delivery_locations '
+                'WHERE correlation_id=?',
+                (row[5],),
+            ).fetchone()
+            if row else None
+        )
     if not row: raise HTTPException(404,'Not found')
-    if user['role'] not in ('admin', 'order_fulfillment_officer', 'finance_officer') and row[10] != user['id']:
-        raise HTTPException(404, 'Not found')
     earliest_delivery, latest_delivery = delivery_dates(row[6])
     return {
         'order_id': row[0],
@@ -971,6 +1337,7 @@ def get_order(order_id: str, user: dict = Depends(get_current_user)):
         'product_name': row[11] or row[2],
         'delivery_facility': row[12],
         'delivery_tracking_id': row[13],
+        'live_location': delivery_location_response(location_row),
     }
 
 @app.get('/')
@@ -997,12 +1364,17 @@ def publish_pending():
             }
         )
         channel.queue_bind(exchange='malta.events',queue='notification.order_placed',routing_key='order.placed')
+        channel.queue_bind(exchange='malta.events',queue='notification.order_placed',routing_key='order.accepted')
+        channel.queue_bind(exchange='malta.events',queue='notification.order_placed',routing_key='order.cancelled')
         with connect() as db:
             rows=db.execute('SELECT event_id,payload FROM outbox WHERE published=0 ORDER BY rowid LIMIT 50').fetchall()
         for eid,payload in rows:
-            channel.basic_publish(exchange='malta.events',routing_key='order.placed',body=payload,properties=pika.BasicProperties(delivery_mode=2,message_id=eid,content_type='application/json'),mandatory=False)
+            event=json.loads(payload)
+            routing_key=NOTIFICATION_ROUTING_KEYS.get(event.get('type'))
+            if not routing_key:
+                raise ValueError(f"Unsupported notification event type: {event.get('type')}")
+            channel.basic_publish(exchange='malta.events',routing_key=routing_key,body=payload,properties=pika.BasicProperties(delivery_mode=2,message_id=eid,content_type='application/json'),mandatory=False)
             with connect() as db:
                 db.execute('UPDATE outbox SET published=1 WHERE event_id=?',(eid,))
-            event=json.loads(payload)
             log.info(json.dumps({'level':'INFO','service':'orders','event':'order_event_published','event_id':eid,'correlation_id':event['correlation_id']}))
     finally: connection.close()

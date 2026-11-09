@@ -81,7 +81,13 @@ def test_batch_order_creation_is_atomic_and_idempotent(order_module):
     assert all(order["duplicate"] for order in retry.json()["orders"])
     with order_module.connect() as db:
         assert db.execute("SELECT count(*) FROM orders").fetchone()[0] == 2
-        assert db.execute("SELECT count(*) FROM outbox").fetchone()[0] == 2
+        assert db.execute("SELECT count(*) FROM outbox").fetchone()[0] == 1
+        event = order_module.json.loads(
+            db.execute("SELECT payload FROM outbox").fetchone()[0]
+        )
+        assert event["type"] == "OrderPlaced"
+        assert event["recipient_email"] == "shopper@example.com"
+        assert len(event["items"]) == 2
 
     changed_payload = {
         "items": [
@@ -262,7 +268,7 @@ def create_checkout_order(client, idempotency_key, email="shopper@example.com", 
     )
 
 
-def test_customer_can_list_orders_without_tracking_id(order_module):
+def test_customer_can_list_orders_with_auto_assigned_tracking_ids(order_module):
     client = make_client(order_module)
     created = create_checkout_order(client, "my-orders-checkout")
     assert created.status_code == 202
@@ -282,6 +288,85 @@ def test_customer_can_list_orders_without_tracking_id(order_module):
         "HEADPHONES-01",
         "SPEAKER-01",
     }
+    expected_ids = {
+        order["order_id"] for order in created.json()["orders"]
+    }
+    assert {item["order_id"] for item in result[0]["items"]} == expected_ids
+    tracking_ids = {
+        item["delivery_tracking_id"] for item in result[0]["items"]
+    }
+    assert len(tracking_ids) == 2
+    assert all(tracking_id.startswith("MT-") for tracking_id in tracking_ids)
+    tracked = client.get(f"/orders/{next(iter(tracking_ids))}")
+    assert tracked.status_code == 200
+    assert tracked.json()["delivery_tracking_id"] in tracking_ids
+
+
+def test_product_reviews_require_a_delivered_purchase_and_allow_one_review(order_module):
+    customer = make_client(order_module)
+    placed = create_checkout_order(customer, "review-checkout")
+    assert placed.status_code == 202
+    assert customer.get("/products/HEADPHONES-01/review-eligibility").json() == {
+        "eligible": False, "delivered": False, "review": None
+    }
+    assert customer.post(
+        "/products/HEADPHONES-01/reviews",
+        json={"rating": 5, "comment": "Lovely sound"},
+    ).status_code == 403
+
+    fulfillment = make_client(
+        order_module, email="delivery@example.com", role="order_fulfillment_officer"
+    )
+    correlation_id = placed.json()["correlation_id"]
+    assert fulfillment.patch(
+        f"/staff/fulfillment/orders/{correlation_id}", json={"status": "RECEIVED"}
+    ).status_code == 200
+    assert fulfillment.patch(
+        f"/staff/fulfillment/orders/{correlation_id}",
+        json={
+            "status": "DISPATCHED",
+            "facility": "Valletta Delivery Facility",
+            "tracking_reference": "MT-REVIEW-123",
+        },
+    ).status_code == 200
+    assert fulfillment.patch(
+        f"/staff/fulfillment/orders/{correlation_id}", json={"status": "DELIVERED"}
+    ).status_code == 200
+
+    eligible = customer.get("/products/HEADPHONES-01/review-eligibility")
+    assert eligible.json() == {"eligible": True, "delivered": True, "review": None}
+    review = customer.post(
+        "/products/HEADPHONES-01/reviews",
+        json={"rating": 5, "comment": "  Lovely sound and very comfortable  "},
+    )
+    assert review.status_code == 201
+    assert review.json()["comment"] == "Lovely sound and very comfortable"
+    assert customer.post(
+        "/products/HEADPHONES-01/reviews",
+        json={"rating": 4, "comment": "A second review"},
+    ).status_code == 409
+
+    public_reviews = customer.get("/products/HEADPHONES-01/reviews")
+    assert public_reviews.json()["review_count"] == 1
+    assert public_reviews.json()["average_rating"] == 5
+    assert public_reviews.json()["reviews"][0]["reviewer"] == "Verified customer"
+    products = customer.get("/products").json()["products"]
+    headphones = next(product for product in products if product["sku"] == "HEADPHONES-01")
+    assert headphones["average_rating"] == 5
+    assert headphones["review_count"] == 1
+
+
+def test_product_reviews_are_private_to_customer_purchase_and_account(order_module):
+    customer = make_client(order_module)
+    assert customer.get("/products/HEADPHONES-01/review-eligibility").status_code == 200
+    assert customer.get("/products/SPEAKER-01/review-eligibility").json()["delivered"] is False
+    assert make_client(order_module, email="other@example.com").post(
+        "/products/HEADPHONES-01/reviews",
+        json={"rating": 5, "comment": "Not my purchase"},
+    ).status_code == 403
+    assert customer.post(
+        "/products/HEADPHONES-01/reviews", json={"rating": 6, "comment": "Too many stars"}
+    ).status_code == 422
 
 def test_customer_can_submit_product_and_delivery_complaints(order_module):
     client = make_client(order_module)
@@ -400,6 +485,15 @@ def test_customer_can_cancel_order_within_twelve_hours(order_module):
 
     assert response.status_code == 200
     assert response.json() == {"status": "CANCELLED", "already_cancelled": False}
+    with order_module.connect() as db:
+        events = [
+            order_module.json.loads(row[0])
+            for row in db.execute("SELECT payload FROM outbox ORDER BY rowid")
+        ]
+    cancellation_events = [event for event in events if event["type"] == "OrderCancelled"]
+    assert len(cancellation_events) == 1
+    assert cancellation_events[0]["recipient_email"] == "shopper@example.com"
+    assert cancellation_events[0]["correlation_id"] == correlation_id
     assert client.post("/orders/my/cancel", json=cancellation).json() == {
         "status": "CANCELLED",
         "already_cancelled": True,
@@ -461,6 +555,21 @@ def test_publisher_sends_and_marks_pending_events(order_module, monkeypatch):
         headers={"Idempotency-Key": "published-order", "X-Correlation-ID": "corr-1"},
     )
     assert response.status_code == 202
+    with order_module.connect() as db:
+        for event_type in ("OrderAccepted", "OrderCancelled"):
+            event_id = f"event-{event_type}"
+            db.execute(
+                "INSERT INTO outbox (event_id,payload,published) VALUES (?,?,0)",
+                (
+                    event_id,
+                    order_module.json.dumps({
+                        "event_id": event_id,
+                        "type": event_type,
+                        "order_id": "published-order",
+                        "correlation_id": "corr-1",
+                    }),
+                ),
+            )
 
     class FakeChannel:
         def __init__(self):
@@ -502,7 +611,7 @@ def test_publisher_sends_and_marks_pending_events(order_module, monkeypatch):
     order_module.publish_pending()
 
     assert connection.closed
-    assert len(connection.fake_channel.published) == 1
+    assert len(connection.fake_channel.published) == 3
     published = connection.fake_channel.published[0]
     assert {
         "exchange": "malta.dead",
@@ -522,6 +631,15 @@ def test_publisher_sends_and_marks_pending_events(order_module, monkeypatch):
         "durable": True,
     } in connection.fake_channel.queues
     assert published["routing_key"] == "order.placed"
+    assert {
+        event["type"]: message["routing_key"]
+        for message in connection.fake_channel.published
+        for event in [order_module.json.loads(message["body"])]
+    } == {
+        "OrderPlaced": "order.placed",
+        "OrderAccepted": "order.accepted",
+        "OrderCancelled": "order.cancelled",
+    }
     assert published["properties"].delivery_mode == 2
     assert published["properties"].content_type == "application/json"
     event = order_module.json.loads(published["body"])
@@ -531,7 +649,7 @@ def test_publisher_sends_and_marks_pending_events(order_module, monkeypatch):
         assert db.execute("SELECT published FROM outbox").fetchone()[0] == 1
 
     order_module.publish_pending()
-    assert len(connection.fake_channel.published) == 1
+    assert len(connection.fake_channel.published) == 3
 
 
 def test_storefront_is_served(order_module):
@@ -823,6 +941,26 @@ def test_fulfillment_lifecycle_and_customer_tracking(order_module):
         json={"status": "RECEIVED"},
     )
     assert accepted.status_code == 200
+    with order_module.connect() as db:
+        events = [
+            order_module.json.loads(row[0])
+            for row in db.execute("SELECT payload FROM outbox ORDER BY rowid")
+        ]
+    accepted_events = [event for event in events if event["type"] == "OrderAccepted"]
+    assert len(accepted_events) == 1
+    assert accepted_events[0]["recipient_email"] == "shopper@example.com"
+    assert accepted_events[0]["correlation_id"] == correlation_id
+    my_order_before_dispatch = customer.post("/orders/my", json={}).json()["orders"][0]
+    expected_order_ids = {
+        item["order_id"] for item in my_order_before_dispatch["items"]
+    }
+    order_item = next(
+        item for item in my_order_before_dispatch["items"]
+        if item["order_id"] == order_id
+    )
+    auto_tracking_id = order_item["delivery_tracking_id"]
+    assert auto_tracking_id.startswith("MT-")
+    assert customer.get(f"/orders/{auto_tracking_id}").json()["order_id"] == order_id
     assert dispatcher.patch(
         f"/staff/fulfillment/orders/{correlation_id}",
         json={"status": "DISPATCHED"},
@@ -841,11 +979,89 @@ def test_fulfillment_lifecycle_and_customer_tracking(order_module):
     assert tracking.json()["status"] == "DISPATCHED"
     assert tracking.json()["delivery_facility"] == "Valletta Delivery Facility"
     assert tracking.json()["delivery_tracking_id"] == "MT-TRACK-123"
+    assert customer.get("/orders/MT-TRACK-123").json()["order_id"] in expected_order_ids
     assert dispatcher.patch(
         f"/staff/fulfillment/orders/{correlation_id}",
         json={"status": "DELIVERED"},
     ).json()["status"] == "DELIVERED"
-    assert customer.post("/orders/my", json={}).json()["orders"][0]["status"] == "DELIVERED"
+    my_order = customer.post("/orders/my", json={}).json()["orders"][0]
+    assert my_order["status"] == "DELIVERED"
+    assert my_order["delivery_facility"] == "Valletta Delivery Facility"
+    assert my_order["delivery_tracking_id"] == "MT-TRACK-123"
+    assert my_order["items"][0]["delivery_tracking_id"] == "MT-TRACK-123"
+
+
+def test_live_delivery_gps_is_opt_in_private_and_expires(order_module):
+    customer = make_client(order_module)
+    dispatcher = make_client(
+        order_module, email="gps-delivery@example.com", role="order_fulfillment_officer"
+    )
+    other_dispatcher = make_client(
+        order_module, email="gps-backup@example.com", role="order_fulfillment_officer"
+    )
+    other_customer = make_client(order_module, email="different-shopper@example.com")
+    placed = create_checkout_order(customer, "gps-sharing")
+    correlation_id = placed.json()["correlation_id"]
+    order_id = placed.json()["orders"][0]["order_id"]
+    location_url = f"/staff/fulfillment/orders/{correlation_id}/location"
+    location = {"latitude": 35.8992, "longitude": 14.5141, "accuracy": 12.5}
+
+    assert customer.put(location_url, json=location).status_code == 403
+    assert dispatcher.put(location_url, json=location).status_code == 409
+    assert customer.get(f"/orders/{order_id}").json()["live_location"] is None
+    assert other_customer.get(f"/orders/{order_id}").status_code == 404
+
+    assert dispatcher.patch(
+        f"/staff/fulfillment/orders/{correlation_id}",
+        json={"status": "RECEIVED"},
+    ).status_code == 200
+    assert dispatcher.patch(
+        f"/staff/fulfillment/orders/{correlation_id}",
+        json={
+            "status": "DISPATCHED",
+            "facility": "Valletta Delivery Facility",
+            "tracking_reference": "MT-GPS-123",
+        },
+    ).status_code == 200
+    assert dispatcher.put(
+        location_url,
+        json={**location, "latitude": 91},
+    ).status_code == 422
+    assert dispatcher.put(location_url, json=location).status_code == 200
+
+    live = customer.get(f"/orders/{order_id}").json()["live_location"]
+    assert live["status"] == "live"
+    assert live["latitude"] == location["latitude"]
+    assert live["longitude"] == location["longitude"]
+    my_order = customer.post("/orders/my", json={}).json()["orders"][0]
+    assert my_order["live_location"]["status"] == "live"
+    assert other_dispatcher.put(location_url, json=location).status_code == 409
+    assert other_dispatcher.delete(location_url).status_code == 403
+
+    with order_module.connect() as db:
+        db.execute(
+            "UPDATE delivery_locations SET updated_at=? WHERE correlation_id=?",
+            ((datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat(), correlation_id),
+        )
+    stale = customer.get(f"/orders/{order_id}").json()["live_location"]
+    assert stale == {"status": "stale", "updated_at": stale["updated_at"]}
+    assert other_dispatcher.put(location_url, json=location).status_code == 200
+    assert dispatcher.delete(location_url).status_code == 403
+    assert other_dispatcher.delete(location_url).json()["status"] == "stopped"
+    assert customer.get(f"/orders/{order_id}").json()["live_location"] is None
+
+    assert dispatcher.put(location_url, json=location).status_code == 200
+    delivered = dispatcher.patch(
+        f"/staff/fulfillment/orders/{correlation_id}",
+        json={"status": "DELIVERED"},
+    )
+    assert delivered.status_code == 200
+    assert customer.get(f"/orders/{order_id}").json()["live_location"] is None
+    with order_module.connect() as db:
+        assert db.execute(
+            "SELECT count(*) FROM delivery_locations WHERE correlation_id=?",
+            (correlation_id,),
+        ).fetchone()[0] == 0
 
 
 def test_finance_can_reconcile_payments_and_refunds(order_module):

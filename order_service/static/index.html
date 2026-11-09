@@ -262,6 +262,32 @@
           <button class="button button-dark" id="productDialogAdd" type="button">Add to bag <span aria-hidden="true">→</span></button>
           <button class="button button-outline" id="productDialogFavorite" type="button" aria-pressed="false">♡ Save</button>
         </div>
+        <section class="product-reviews" aria-labelledby="productReviewsTitle">
+          <div class="reviews-heading">
+            <div>
+              <p class="eyebrow">CUSTOMER NOTES</p>
+              <h3 id="productReviewsTitle">Kind words, <em>from customers.</em></h3>
+            </div>
+            <p class="reviews-summary" id="productReviewSummary" aria-live="polite"></p>
+          </div>
+          <p class="review-notice" id="productReviewNotice" role="status">Loading reviews…</p>
+          <div class="review-list" id="productReviewList" aria-live="polite"></div>
+          <button class="button button-outline review-sign-in" id="reviewSignIn" type="button" hidden>Log in to review</button>
+          <form id="productReviewForm" class="product-review-form" hidden>
+            <label class="form-label" for="productReviewRating">Your rating</label>
+            <select class="form-input" id="productReviewRating" name="rating" required>
+              <option value="5">★★★★★ — Loved it</option>
+              <option value="4">★★★★☆ — Really good</option>
+              <option value="3">★★★☆☆ — It’s nice</option>
+              <option value="2">★★☆☆☆ — Could be better</option>
+              <option value="1">★☆☆☆☆ — Not for me</option>
+            </select>
+            <label class="form-label" for="productReviewComment">Your review</label>
+            <textarea class="form-input review-comment" id="productReviewComment" name="comment" minlength="3" maxlength="1000" rows="3" placeholder="What did you think? (3–1000 characters)" required></textarea>
+            <p class="form-error" id="productReviewError" role="alert" hidden></p>
+            <button class="button button-dark modal-submit" id="submitProductReview" type="submit">Share your review <span aria-hidden="true">→</span></button>
+          </form>
+        </section>
       </div>
     </div>
   </dialog>
@@ -271,10 +297,10 @@
     <div class="modal-content">
       <p class="eyebrow">A LITTLE UPDATE</p>
       <h2 id="trackTitle">Find your<br><em>order.</em></h2>
-      <p class="modal-intro">Enter an order ID from your confirmation to check its status and estimated delivery window.</p>
+      <p class="modal-intro">Enter the order ID from your confirmation or the Tracking ID from My Orders to check its status and estimated delivery window.</p>
       <form id="trackForm">
-        <label class="form-label" for="trackOrderId">Order ID</label>
-        <input class="form-input" id="trackOrderId" name="orderId" type="text" autocomplete="off" placeholder="Paste your order ID" required>
+        <label class="form-label" for="trackOrderId">Order ID or Tracking ID</label>
+        <input class="form-input" id="trackOrderId" name="orderId" type="text" autocomplete="off" placeholder="Paste your order or tracking ID" required>
         <p class="form-error" id="trackError" role="alert" hidden></p>
         <div class="track-result" id="trackResult" hidden></div>
         <button class="button button-dark modal-submit" type="submit">Look up order <span aria-hidden="true">→</span></button>
@@ -282,7 +308,7 @@
     </div>
   </dialog>
 
-  <dialog class="modal" id="accountDialog" aria-labelledby="accountTitle">
+  <dialog class="modal account-dialog" id="accountDialog" aria-labelledby="accountTitle">
     <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close account form">×</button>
     <div class="modal-content">
       <p class="eyebrow">YOUR MALTA SHOP ACCOUNT</p>
@@ -391,13 +417,18 @@
   <dialog class="modal my-orders-modal" id="myOrdersDialog" aria-labelledby="myOrdersTitle">
     <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close my orders">×</button>
     <div class="modal-content">
-      <p class="eyebrow">YOUR MALTA SHOP ORDERS</p>
-      <h2 id="myOrdersTitle">My <em>orders.</em></h2>
-      <p class="modal-intro">Your account’s orders appear here. Orders can be cancelled within 12 hours after a confirmation prompt. To report a product or delivery-person issue, choose “Report a problem” on an order.</p>
-      <form id="myOrdersForm">
+      <div class="my-orders-heading">
+        <div>
+          <p class="eyebrow">YOUR MALTA SHOP ORDERS</p>
+          <h2 id="myOrdersTitle">My <em>orders.</em></h2>
+          <p class="modal-intro">Everything you’ve ordered, together in one place. Track deliveries, find an order ID, or get support.</p>
+        </div>
+        <form id="myOrdersForm" class="my-orders-refresh-form">
         <p class="form-error" id="myOrdersError" role="alert" hidden></p>
-        <button class="button button-dark modal-submit" id="findMyOrders" type="submit">Find my orders <span aria-hidden="true">→</span></button>
-      </form>
+          <button class="button button-outline my-orders-refresh" id="findMyOrders" type="submit"><span aria-hidden="true">↻</span> Refresh orders</button>
+        </form>
+      </div>
+      <div class="my-orders-summary" id="myOrdersSummary" aria-label="Order summary" hidden></div>
       <div class="my-orders-list" id="myOrdersList" aria-live="polite" hidden></div>
     </div>
   </dialog>

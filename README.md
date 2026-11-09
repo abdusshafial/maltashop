@@ -16,6 +16,27 @@ Open `http://127.0.0.1:8000/`. The demo storefront and order endpoints are serve
 The cookie setting above is for local HTTP only; use `SESSION_COOKIE_SECURE=true`
 when serving over HTTPS.
 
+## Order email notifications
+
+The Docker Compose notification worker can send three transactional emails to
+the signed-in customer's account email: order confirmed at checkout, order
+accepted by fulfillment staff, and order cancelled. To enable Gmail delivery:
+
+1. Copy `.env.example` to `.env`.
+2. Set `SMTP_USER` to the sending Gmail address and `SMTP_FROM` to that address
+   (or leave `SMTP_FROM` empty).
+3. Create a Google App Password after enabling 2-Step Verification, then put
+   the full 16-character app password in `SMTP_PASSWORD` (spaces are okay).
+   Do not use your normal Google password or commit `.env`.
+4. Start or rebuild the services with `docker compose up --build -d`.
+
+The worker uses Gmail SMTP over TLS on port 587 by default. Without SMTP
+credentials it leaves email events queued and logs that setup is required;
+the standalone local Uvicorn command above does not run RabbitMQ or the email
+worker. The worker starts processing queued emails after valid credentials are
+configured. Check delivery attempts with
+`docker compose logs notification-worker --tail 60`.
+
 ## Accounts, roles, inventory, and orders
 
 Customers create an account with their name, email, and password and must be
@@ -57,7 +78,16 @@ any public HTTPS deployment.
   (`PENDING` → `RECEIVED`), records the delivery facility and tracking reference
   when dispatching (`RECEIVED` → `DISPATCHED`), and confirms successful delivery
   (`DISPATCHED` → `DELIVERED`). Customers can see the progress and tracking
-  details on their own orders.
+  details on their own orders. After dispatch, staff can explicitly start GPS
+  sharing from a phone or other location-enabled device; the browser asks for
+  permission, and the customer's signed-in account can see the live position.
+  GPS sharing requires HTTPS (localhost is also a secure browser context).
+  Staff can stop sharing at any time; stale coordinates are hidden after two
+  minutes without an update and location data is deleted when delivery is
+  confirmed.
+- Transactional emails are sent for order confirmation, fulfillment acceptance,
+  and customer cancellation. The order and its email event are saved together;
+  notifications are delivered by the RabbitMQ worker.
 - **Finance officer** reviews order totals and a reconciliation summary, then
   records externally confirmed payments and refunds for cancelled, paid orders.
   The demo does not collect or process money.
