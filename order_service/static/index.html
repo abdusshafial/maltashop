@@ -329,7 +329,25 @@
         <label class="form-label" for="accountPassword">Password</label>
         <input class="form-input" id="accountPassword" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="256" required>
         <p class="form-error" id="accountError" role="alert" hidden></p>
+        <p id="accountMessage" role="status" hidden></p>
         <button class="button button-dark modal-submit" id="accountSubmit" type="submit">Log in <span aria-hidden="true">→</span></button>
+        <button class="button button-outline modal-submit forgot-password-button" id="forgotPasswordLink" type="button">Forgot password?</button>
+      </form>
+      <form id="forgotPasswordForm" hidden>
+        <label class="form-label" for="resetRequestEmail">Email address</label>
+        <input class="form-input" id="resetRequestEmail" name="email" type="email" autocomplete="email" maxlength="100" required>
+        <p class="form-error" id="forgotPasswordError" role="alert" hidden></p>
+        <p id="forgotPasswordMessage" role="status" hidden></p>
+        <button class="button button-dark modal-submit" id="forgotPasswordSubmit" type="submit">Send reset link <span aria-hidden="true">→</span></button>
+        <button class="text-button" id="backToLogin" type="button">Back to log in</button>
+      </form>
+      <form id="resetPasswordForm" hidden>
+        <label class="form-label" for="newPassword">New password</label>
+        <input class="form-input" id="newPassword" name="password" type="password" autocomplete="new-password" minlength="10" maxlength="256" required>
+        <label class="form-label" for="confirmNewPassword">Confirm new password</label>
+        <input class="form-input" id="confirmNewPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="10" maxlength="256" required>
+        <p class="form-error" id="resetPasswordError" role="alert" hidden></p>
+        <button class="button button-dark modal-submit" id="resetPasswordSubmit" type="submit">Update password <span aria-hidden="true">→</span></button>
       </form>
     </div>
   </dialog>

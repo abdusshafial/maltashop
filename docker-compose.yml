@@ -23,6 +23,7 @@ services:
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
       INITIAL_ADMIN_NAME: ${INITIAL_ADMIN_NAME:-Shop Administrator}
       DEMO_ACCOUNTS: ${DEMO_ACCOUNTS:-false}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://127.0.0.1:8000}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
     volumes:
       - orderdata:/data

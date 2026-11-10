@@ -23,11 +23,13 @@ EVENT_ROUTING_KEYS = {
     'OrderPlaced': 'order.placed',
     'OrderAccepted': 'order.accepted',
     'OrderCancelled': 'order.cancelled',
+    'PasswordReset': 'password.reset',
 }
 EVENT_SUBJECTS = {
     'OrderPlaced': 'Your MaltaShop order is confirmed',
     'OrderAccepted': 'Your MaltaShop order has been accepted',
     'OrderCancelled': 'Your MaltaShop order has been cancelled',
+    'PasswordReset': 'Reset your MaltaShop password',
 }
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 log = logging.getLogger('notifications')
@@ -63,10 +65,19 @@ def validate_event(event):
         raise ValueError('Event must be a JSON object')
     if event.get('type') not in EVENT_SUBJECTS:
         raise ValueError('Unsupported event')
-    for key in ('event_id', 'correlation_id'):
+    for key in ('event_id',):
         value = event.get(key)
         if not isinstance(value, str) or not value.strip():
             raise ValueError('Missing ' + key)
+    if event['type'] == 'PasswordReset':
+        for key in ('recipient_email', 'reset_url'):
+            value = event.get(key)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError('Missing ' + key)
+        return event['recipient_email'], [], []
+    value = event.get('correlation_id')
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('Missing correlation_id')
     order_ids = event.get('order_ids') or [event.get('order_id')]
     if not order_ids or any(not isinstance(value, str) or not value.strip() for value in order_ids):
         raise ValueError('Missing order_id')
@@ -85,6 +96,38 @@ def validate_event(event):
     ):
         raise ValueError('Invalid items')
     return recipient, order_ids, items or []
+
+def send_password_reset_email(event):
+    if not email_is_configured():
+        raise RuntimeError('SMTP is not configured; set SMTP_USER and SMTP_PASSWORD')
+
+    reset_url = event['reset_url']
+    message = EmailMessage()
+    message['Subject'] = EVENT_SUBJECTS['PasswordReset']
+    message['From'] = SMTP_FROM
+    message['To'] = event['recipient_email']
+    message.set_content(
+        'We received a request to reset your MaltaShop password.\n\n'
+        f'Use this one-time link within 30 minutes:\n{reset_url}\n\n'
+        'If you did not request a password reset, you can ignore this email.'
+    )
+    message.add_alternative(
+        '<html><body><p>We received a request to reset your MaltaShop password.</p>'
+        f'<p><a href="{html.escape(reset_url, quote=True)}">Reset your password</a></p>'
+        '<p>This one-time link expires in 30 minutes. If you did not request a '
+        'password reset, you can ignore this email.</p></body></html>',
+        subtype='html',
+    )
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+        server.starttls(context=create_default_context())
+        server.login(SMTP_USER, SMTP_PASSWORD)
+        server.send_message(message)
+    log.info(json.dumps({
+        'level': 'INFO',
+        'service': 'notifications',
+        'event': 'password_reset_email_sent',
+        'event_id': event['event_id'],
+    }))
 
 
 def send_email(event, recipient, order_ids, items):
@@ -152,10 +195,35 @@ def initialize():
             'event_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, '
             'correlation_id TEXT NOT NULL, processed_at TEXT DEFAULT CURRENT_TIMESTAMP)'
         )
+        db.execute(
+            'CREATE TABLE IF NOT EXISTS received_password_reset_events ('
+            'event_id TEXT PRIMARY KEY, processed_at TEXT DEFAULT CURRENT_TIMESTAMP)'
+        )
 
 
 def apply_event(event):
     recipient, order_ids, items = validate_event(event)
+    if event['type'] == 'PasswordReset':
+        with connect() as db:
+            if db.execute(
+                'SELECT 1 FROM received_password_reset_events WHERE event_id=?',
+                (event['event_id'],),
+            ).fetchone():
+                inserted = False
+            else:
+                send_password_reset_email(event)
+                db.execute(
+                    'INSERT INTO received_password_reset_events(event_id) VALUES (?)',
+                    (event['event_id'],),
+                )
+                inserted = True
+        log.info(json.dumps({
+            'level': 'INFO',
+            'service': 'notifications',
+            'event': 'password_reset_consumed' if inserted else 'duplicate_ignored',
+            'event_id': event['event_id'],
+        }))
+        return inserted
     with connect() as db:
         if db.execute(
             'SELECT 1 FROM received_events WHERE event_id=?',

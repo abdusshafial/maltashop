@@ -570,6 +570,19 @@ def test_publisher_sends_and_marks_pending_events(order_module, monkeypatch):
                     }),
                 ),
             )
+        db.execute(
+            "INSERT INTO outbox (event_id,payload,published) VALUES (?,?,0)",
+            (
+                "event-password-reset",
+                order_module.json.dumps({
+                    "event_id": "event-password-reset",
+                    "type": "PasswordReset",
+                    "recipient_email": "customer@example.com",
+                    "reset_url": "https://shop.example.com/#reset-token=token",
+                    "expires_at": "2026-11-10T09:30:00+00:00",
+                }),
+            ),
+        )
 
     class FakeChannel:
         def __init__(self):
@@ -611,7 +624,7 @@ def test_publisher_sends_and_marks_pending_events(order_module, monkeypatch):
     order_module.publish_pending()
 
     assert connection.closed
-    assert len(connection.fake_channel.published) == 3
+    assert len(connection.fake_channel.published) == 4
     published = connection.fake_channel.published[0]
     assert {
         "exchange": "malta.dead",
@@ -639,6 +652,7 @@ def test_publisher_sends_and_marks_pending_events(order_module, monkeypatch):
         "OrderPlaced": "order.placed",
         "OrderAccepted": "order.accepted",
         "OrderCancelled": "order.cancelled",
+        "PasswordReset": "password.reset",
     }
     assert published["properties"].delivery_mode == 2
     assert published["properties"].content_type == "application/json"
@@ -649,7 +663,7 @@ def test_publisher_sends_and_marks_pending_events(order_module, monkeypatch):
         assert db.execute("SELECT published FROM outbox").fetchone()[0] == 1
 
     order_module.publish_pending()
-    assert len(connection.fake_channel.published) == 3
+    assert len(connection.fake_channel.published) == 4
 
 
 def test_storefront_is_served(order_module):
@@ -698,6 +712,112 @@ def test_authentication_requires_login_and_sets_secure_session_cookie(order_modu
     ).status_code == 200
     assert login.post("/auth/logout").status_code == 200
     assert login.get("/auth/me").status_code == 401
+
+
+def test_password_reset_changes_password_and_revokes_sessions(order_module):
+    account = TestClient(order_module.app)
+    assert account.post(
+        "/auth/register",
+        json={
+            "email": "reset-customer@example.com",
+            "full_name": "Reset Customer",
+            "password": "original-password-123",
+        },
+    ).status_code == 201
+    old_session = account.cookies.get(order_module.SESSION_COOKIE)
+
+    anonymous = TestClient(order_module.app)
+    known_response = anonymous.post(
+        "/auth/password-reset/request",
+        json={"email": "RESET-CUSTOMER@example.com"},
+    )
+    unknown_response = anonymous.post(
+        "/auth/password-reset/request",
+        json={"email": "unknown@example.com"},
+    )
+    assert known_response.status_code == unknown_response.status_code == 200
+    assert known_response.json() == unknown_response.json()
+
+    with order_module.connect() as db:
+        reset_event = order_module.json.loads(
+            db.execute(
+                "SELECT payload FROM outbox WHERE published=0 ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()[0]
+        )
+        token = reset_event["reset_url"].split("#reset-token=", 1)[1]
+        token_hash = order_module.hashlib.sha256(token.encode()).hexdigest()
+        assert db.execute(
+            "SELECT 1 FROM password_reset_tokens WHERE token_hash=?", (token_hash,)
+        ).fetchone()
+
+    changed = anonymous.post(
+        "/auth/password-reset/confirm",
+        json={"token": token, "password": "new-password-123"},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["message"] == "Your password has been updated. Please log in."
+    assert account.get("/auth/me").status_code == 401
+    assert anonymous.post(
+        "/auth/login",
+        json={"email": "reset-customer@example.com", "password": "original-password-123"},
+    ).status_code == 401
+    assert anonymous.post(
+        "/auth/login",
+        json={"email": "reset-customer@example.com", "password": "new-password-123"},
+    ).status_code == 200
+    assert anonymous.post(
+        "/auth/password-reset/confirm",
+        json={"token": token, "password": "another-password-123"},
+    ).status_code == 400
+    assert old_session
+
+
+def test_staff_roles_can_request_password_reset(order_module):
+    for role in (
+        "admin",
+        "product_management_officer",
+        "inventory_manager",
+        "order_fulfillment_officer",
+        "finance_officer",
+    ):
+        client = make_client(
+            order_module,
+            email=f"{role.replace('_', '-')}@example.com",
+            role=role,
+        )
+        response = client.post(
+            "/auth/password-reset/request",
+            json={"email": f"{role.replace('_', '-')}@example.com"},
+        )
+        assert response.status_code == 200
+
+
+def test_password_reset_rejects_expired_token(order_module):
+    client = make_client(order_module)
+    client.post(
+        "/auth/password-reset/request",
+        json={"email": "shopper@example.com"},
+    )
+    with order_module.connect() as db:
+        payload = order_module.json.loads(
+            db.execute(
+                "SELECT payload FROM outbox WHERE published=0 ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()[0]
+        )
+        token = payload["reset_url"].split("#reset-token=", 1)[1]
+        token_hash = order_module.hashlib.sha256(token.encode()).hexdigest()
+        expired_at = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+        db.execute(
+            "UPDATE password_reset_tokens SET expires_at=? WHERE token_hash=?",
+            (expired_at, token_hash),
+        )
+
+    response = client.post(
+        "/auth/password-reset/confirm",
+        json={"token": token, "password": "new-password-123"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "This reset link is invalid or has expired."
 
 
 def test_initial_admin_bootstrap_requires_valid_credentials(order_module, monkeypatch):

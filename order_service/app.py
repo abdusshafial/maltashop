@@ -8,10 +8,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 import pika
 from pathlib import Path
+from urllib.parse import quote
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB = os.getenv('ORDER_DB', str(PROJECT_ROOT / 'data' / 'orders.db'))
 RABBIT = os.getenv('RABBITMQ_HOST', 'rabbitmq')
+PUBLIC_APP_URL = os.getenv('PUBLIC_APP_URL', 'http://127.0.0.1:8000').rstrip('/')
 MIN_DELIVERY_DAYS = 2
 MAX_DELIVERY_DAYS = 5
 LOCATION_STALE_AFTER = timedelta(minutes=2)
@@ -19,9 +21,12 @@ NOTIFICATION_ROUTING_KEYS = {
     'OrderPlaced': 'order.placed',
     'OrderAccepted': 'order.accepted',
     'OrderCancelled': 'order.cancelled',
+    'PasswordReset': 'password.reset',
 }
 SESSION_COOKIE = 'maltashop_session'
 SESSION_DAYS = 30
+PASSWORD_RESET_MINUTES = 30
+PASSWORD_RESET_REQUEST_COOLDOWN = timedelta(minutes=1)
 PASSWORD_ITERATIONS = 310_000
 PRODUCT_ROLES = ('admin', 'product_management_officer')
 INVENTORY_ROLES = ('admin', 'inventory_manager')
@@ -72,6 +77,13 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     email: str = Field(min_length=3, max_length=100)
     password: str = Field(min_length=1, max_length=256)
+
+class PasswordResetRequestIn(BaseModel):
+    email: str = Field(min_length=3, max_length=100)
+
+class PasswordResetIn(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+    password: str = Field(min_length=10, max_length=256)
 
 class AdminUserIn(RegisterIn):
     role: str = Field(pattern='^(customer|admin|product_management_officer|inventory_manager|order_fulfillment_officer|finance_officer)$')
@@ -333,6 +345,17 @@ def initialize():
             'created_at TEXT NOT NULL,expires_at TEXT NOT NULL)'
         )
         db.execute(
+            'CREATE TABLE IF NOT EXISTS password_reset_tokens ('
+            'token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL,expires_at TEXT NOT NULL,created_at TEXT NOT NULL)'
+        )
+        db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id)'
+        )
+        db.execute(
+            'CREATE TABLE IF NOT EXISTS password_reset_requests ('
+            'email_hash TEXT PRIMARY KEY,requested_at TEXT NOT NULL)'
+        )
+        db.execute(
             'CREATE TABLE IF NOT EXISTS products (sku TEXT PRIMARY KEY,name TEXT NOT NULL,category TEXT NOT NULL,'
             'price_cents INTEGER NOT NULL CHECK(price_cents>0),stock INTEGER NOT NULL CHECK(stock>=0),'
             'tag TEXT NOT NULL,image TEXT NOT NULL,description TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 1,'
@@ -522,6 +545,73 @@ def login(body: LoginIn, response: Response):
         token = create_session(db, row[0])
     set_session_cookie(response, token)
     return public_user({'id': row[0], 'email': row[1], 'full_name': row[2], 'role': row[4]})
+
+@app.post('/auth/password-reset/request', dependencies=[Depends(require_same_origin)])
+def request_password_reset(body: PasswordResetRequestIn):
+    email = normalize_email(body.email)
+    email_hash = hashlib.sha256(email.encode('utf-8')).hexdigest()
+    now = datetime.now(timezone.utc)
+    with connect() as db:
+        previous = db.execute(
+            'SELECT requested_at FROM password_reset_requests WHERE email_hash=?',
+            (email_hash,)
+        ).fetchone()
+        if previous:
+            previous_at = datetime.fromisoformat(previous[0])
+            if now - previous_at < PASSWORD_RESET_REQUEST_COOLDOWN:
+                return {'message': 'If an active account exists for that email, a password reset link will be sent.'}
+        db.execute(
+            'INSERT INTO password_reset_requests(email_hash,requested_at) VALUES (?,?) '
+            'ON CONFLICT(email_hash) DO UPDATE SET requested_at=excluded.requested_at',
+            (email_hash, now.isoformat())
+        )
+        user = db.execute(
+            'SELECT id,email FROM users WHERE email=? AND is_active=1',
+            (email,)
+        ).fetchone()
+        if user:
+            reset_token = secrets.token_urlsafe(32)
+            expires_at = (now + timedelta(minutes=PASSWORD_RESET_MINUTES)).isoformat()
+            db.execute('DELETE FROM password_reset_tokens WHERE user_id=?', (user[0],))
+            db.execute(
+                'INSERT INTO password_reset_tokens(token_hash,user_id,expires_at,created_at) VALUES (?,?,?,?)',
+                (hashlib.sha256(reset_token.encode('utf-8')).hexdigest(), user[0], expires_at, now.isoformat())
+            )
+            event_id = str(uuid.uuid4())
+            event = {
+                'type': 'PasswordReset',
+                'event_id': event_id,
+                'recipient_email': user[1],
+                'reset_url': f'{PUBLIC_APP_URL}/#reset-token={quote(reset_token, safe="")}',
+                'expires_at': expires_at,
+            }
+            db.execute(
+                'INSERT INTO outbox (event_id,payload,published) VALUES (?,?,0)',
+                (event_id, json.dumps(event))
+            )
+    return {'message': 'If an active account exists for that email, a password reset link will be sent.'}
+
+@app.post('/auth/password-reset/confirm', dependencies=[Depends(require_same_origin)])
+def confirm_password_reset(body: PasswordResetIn):
+    token_hash = hashlib.sha256(body.token.encode('utf-8')).hexdigest()
+    now = datetime.now(timezone.utc)
+    with connect() as db:
+        row = db.execute(
+            'SELECT t.user_id,t.expires_at FROM password_reset_tokens t '
+            'JOIN users u ON u.id=t.user_id WHERE t.token_hash=? AND u.is_active=1',
+            (token_hash,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(400, 'This reset link is invalid or has expired.')
+        if datetime.fromisoformat(row[1]) <= now:
+            raise HTTPException(400, 'This reset link is invalid or has expired.')
+        db.execute(
+            'UPDATE users SET password_hash=? WHERE id=?',
+            (hash_password(body.password), row[0])
+        )
+        db.execute('DELETE FROM password_reset_tokens WHERE user_id=?', (row[0],))
+        db.execute('DELETE FROM sessions WHERE user_id=?', (row[0],))
+    return {'message': 'Your password has been updated. Please log in.'}
 
 @app.post('/auth/logout', dependencies=[Depends(require_same_origin)])
 def logout(request: Request, response: Response):
@@ -1366,6 +1456,7 @@ def publish_pending():
         channel.queue_bind(exchange='malta.events',queue='notification.order_placed',routing_key='order.placed')
         channel.queue_bind(exchange='malta.events',queue='notification.order_placed',routing_key='order.accepted')
         channel.queue_bind(exchange='malta.events',queue='notification.order_placed',routing_key='order.cancelled')
+        channel.queue_bind(exchange='malta.events',queue='notification.order_placed',routing_key='password.reset')
         with connect() as db:
             rows=db.execute('SELECT event_id,payload FROM outbox WHERE published=0 ORDER BY rowid LIMIT 50').fetchall()
         for eid,payload in rows:
@@ -1376,5 +1467,9 @@ def publish_pending():
             channel.basic_publish(exchange='malta.events',routing_key=routing_key,body=payload,properties=pika.BasicProperties(delivery_mode=2,message_id=eid,content_type='application/json'),mandatory=False)
             with connect() as db:
                 db.execute('UPDATE outbox SET published=1 WHERE event_id=?',(eid,))
-            log.info(json.dumps({'level':'INFO','service':'orders','event':'order_event_published','event_id':eid,'correlation_id':event['correlation_id']}))
+            log.info(json.dumps({
+                'level': 'INFO', 'service': 'orders', 'event': 'notification_event_published',
+                'event_id': eid, 'correlation_id': event.get('correlation_id'),
+                'type': event.get('type'),
+            }))
     finally: connection.close()

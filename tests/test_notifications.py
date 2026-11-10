@@ -15,6 +15,15 @@ def valid_event():
         "correlation_id": "corr-1",
     }
 
+def valid_password_reset_event():
+    return {
+        "type": "PasswordReset",
+        "event_id": "reset-evt-1",
+        "recipient_email": "customer@example.com",
+        "reset_url": "https://shop.example.com/#reset-token=one-time-token",
+        "expires_at": "2026-11-10T09:30:00+00:00",
+    }
+
 
 def test_event_consumed_once(notification_module, monkeypatch):
     notification_module.initialize()
@@ -29,6 +38,25 @@ def test_event_consumed_once(notification_module, monkeypatch):
     )
     with notification_module.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM received_events").fetchone()[0] == 1
+
+
+def test_password_reset_event_is_sent_and_deduplicated(
+    notification_module, monkeypatch
+):
+    notification_module.initialize()
+    event = valid_password_reset_event()
+    send_reset_email = Mock()
+    monkeypatch.setattr(
+        notification_module, "send_password_reset_email", send_reset_email
+    )
+
+    assert notification_module.apply_event(event) is True
+    assert notification_module.apply_event(event) is False
+    send_reset_email.assert_called_once_with(event)
+    with notification_module.connect() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM received_password_reset_events"
+        ).fetchone()[0] == 1
 
 
 @pytest.mark.parametrize(
@@ -84,7 +112,12 @@ def test_queue_setup_routes_failed_messages_to_durable_dead_letter_queue(
             "x-dead-letter-routing-key": "notification.order_placed.dead",
         },
     )
-    for routing_key in ("order.placed", "order.accepted", "order.cancelled"):
+    for routing_key in (
+        "order.placed",
+        "order.accepted",
+        "order.cancelled",
+        "password.reset",
+    ):
         channel.queue_bind.assert_any_call(
             exchange="malta.events",
             queue="notification.order_placed",
@@ -199,6 +232,27 @@ def test_sends_gmail_smtp_status_email(
     assert message["Subject"] == subject
     assert "Ari Borg" in message.get_body(preferencelist=("plain",)).get_content()
     assert "order-1" in message.get_body(preferencelist=("plain",)).get_content()
+
+
+def test_sends_password_reset_email(notification_module, monkeypatch):
+    notification_module.SMTP_USER = "shop@example.com"
+    notification_module.SMTP_PASSWORD = "abcdefghijklmnop"
+    notification_module.SMTP_FROM = "shop@example.com"
+    server = Mock()
+    server.__enter__ = Mock(return_value=server)
+    server.__exit__ = Mock(return_value=False)
+    smtp = Mock(return_value=server)
+    monkeypatch.setattr(notification_module.smtplib, "SMTP", smtp)
+    event = valid_password_reset_event()
+
+    notification_module.send_password_reset_email(event)
+
+    server.login.assert_called_once_with("shop@example.com", "abcdefghijklmnop")
+    message = server.send_message.call_args.args[0]
+    assert message["To"] == "customer@example.com"
+    assert message["Subject"] == "Reset your MaltaShop password"
+    assert "one-time-token" in message.get_body(preferencelist=("plain",)).get_content()
+    assert "one-time-token" in message.get_body(preferencelist=("html",)).get_content()
 
 
 def test_gmail_app_password_spaces_are_removed(notification_module, monkeypatch):

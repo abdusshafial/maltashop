@@ -18,9 +18,10 @@ when serving over HTTPS.
 
 ## Order email notifications
 
-The Docker Compose notification worker can send three transactional emails to
-the signed-in customer's account email: order confirmed at checkout, order
-accepted by fulfillment staff, and order cancelled. To enable Gmail delivery:
+The Docker Compose notification worker can send transactional emails to the
+signed-in customer's account email: order confirmed at checkout, order
+accepted by fulfillment staff, order cancelled, and password reset links. To
+enable Gmail delivery:
 
 1. Copy `.env.example` to `.env`.
 2. Set `SMTP_USER` to the sending Gmail address and `SMTP_FROM` to that address
@@ -52,6 +53,14 @@ any public HTTPS deployment.
   Docker Compose, put these values in an untracked local `.env` file. For
   a local run, set them in the shell before starting Uvicorn. For PythonAnywhere,
   set them in the WSGI configuration before importing the app.
+- The shared login dialog's **Forgot password?** link works for customer and
+  staff accounts. It sends a one-time link to the account email; the link
+  expires after 30 minutes and changing the password signs out existing sessions.
+  Configure SMTP as described above and set `PUBLIC_APP_URL` to the public
+  storefront URL (for example `https://shop.example.com`). For local Docker
+  Compose, the default is `http://127.0.0.1:8000`. A standalone Uvicorn run does
+  not run the RabbitMQ publisher or notification worker, so reset emails require
+  Docker Compose or equivalent services.
 - Optional local/demo accounts can be created by setting `DEMO_ACCOUNTS=true`
   before startup (or in the local Compose `.env`). Demo users are inserted only
   if their accounts do not already exist:

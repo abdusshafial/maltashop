@@ -55,6 +55,8 @@ let pendingCancellation = null;
 let inventory = [];
 let managementUsers = [];
 let checkoutAfterLogin = false;
+let accountFlow = "account";
+let pendingResetToken = new URLSearchParams(window.location.hash.slice(1)).get("reset-token");
 const deliveryLocationWatches = new Map();
 let trackLocationPollTimer = null;
 let myOrdersLocationPollTimer = null;
@@ -407,9 +409,12 @@ function setDrawerOpen(open) {
 
 function openAccountDialog({ afterLogin = false } = {}) {
   checkoutAfterLogin = afterLogin;
+  accountFlow = "account";
   document.querySelector("#accountError").hidden = true;
-  document.querySelector("#accountDialog").showModal();
+  document.querySelector("#accountMessage").hidden = true;
   document.querySelector("#accountEmail").value = authenticatedUser?.email || "";
+  syncAccountMode();
+  document.querySelector("#accountDialog").showModal();
 }
 
 function renderAccountState() {
@@ -492,14 +497,98 @@ async function sendJson(url, body, method = "POST") {
 }
 
 function syncAccountMode() {
+  const accountForm = document.querySelector("#accountForm");
+  const forgotPasswordForm = document.querySelector("#forgotPasswordForm");
+  const resetPasswordForm = document.querySelector("#resetPasswordForm");
+  accountForm.hidden = accountFlow !== "account";
+  forgotPasswordForm.hidden = accountFlow !== "forgot";
+  resetPasswordForm.hidden = accountFlow !== "reset";
+  const title = document.querySelector("#accountTitle");
+  const intro = document.querySelector("#accountIntro");
+  if (accountFlow === "forgot") {
+    title.textContent = "Forgot your password?";
+    intro.textContent = "Enter your account email and we’ll send a one-time reset link if it matches an active account.";
+    return;
+  }
+  if (accountFlow === "reset") {
+    title.textContent = "Choose a new password";
+    intro.textContent = "Set a new password for your account.";
+    return;
+  }
   const registering = document.querySelector("#accountMode").value === "register";
   const nameField = document.querySelector("#accountNameField");
   nameField.hidden = !registering;
   document.querySelector("#accountName").required = registering;
   document.querySelector("#accountPassword").autocomplete = registering ? "new-password" : "current-password";
+  document.querySelector("#forgotPasswordLink").hidden = registering;
   document.querySelector("#accountSubmit").innerHTML =
     `${registering ? "Create account" : "Log in"} <span aria-hidden="true">→</span>`;
-  document.querySelector("#accountTitle").innerHTML = registering ? "Join the <em>islands.</em>" : "Welcome <em>in.</em>";
+  title.innerHTML = registering ? "Join the <em>islands.</em>" : "Welcome <em>in.</em>";
+  intro.textContent = "Log in or create an account to place an order and see your orders.";
+}
+function showForgotPassword() {
+  accountFlow = "forgot";
+  document.querySelector("#resetRequestEmail").value = document.querySelector("#accountEmail").value.trim();
+  document.querySelector("#forgotPasswordError").hidden = true;
+  document.querySelector("#forgotPasswordMessage").hidden = true;
+  syncAccountMode();
+  document.querySelector("#resetRequestEmail").focus();
+}
+
+async function submitPasswordResetRequest(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = document.querySelector("#forgotPasswordSubmit");
+  const errorBox = document.querySelector("#forgotPasswordError");
+  const message = document.querySelector("#forgotPasswordMessage");
+  errorBox.hidden = true;
+  message.hidden = true;
+  button.disabled = true;
+  try {
+    const email = new FormData(form).get("email").toString().trim();
+    await sendJson("/auth/password-reset/request", { email });
+    message.textContent = "If an active account exists for that email, a reset link will be sent. Check your inbox.";
+    message.hidden = false;
+  } catch (error) {
+    errorBox.textContent = error.message || "Could not request a reset link. Please try again.";
+    errorBox.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function submitPasswordReset(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const button = document.querySelector("#resetPasswordSubmit");
+  const errorBox = document.querySelector("#resetPasswordError");
+  errorBox.hidden = true;
+  if (formData.get("password") !== formData.get("confirmPassword")) {
+    errorBox.textContent = "The passwords do not match.";
+    errorBox.hidden = false;
+    return;
+  }
+  button.disabled = true;
+  try {
+    await sendJson("/auth/password-reset/confirm", {
+      token: pendingResetToken,
+      password: formData.get("password").toString()
+    });
+    pendingResetToken = null;
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    accountFlow = "account";
+    document.querySelector("#accountMode").value = "login";
+    document.querySelector("#accountForm").reset();
+    document.querySelector("#accountMessage").textContent = "Your password has been updated. Please log in.";
+    document.querySelector("#accountMessage").hidden = false;
+    syncAccountMode();
+  } catch (error) {
+    errorBox.textContent = error.message || "Could not update your password. Request a new reset link.";
+    errorBox.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function submitAccount(event) {
@@ -1987,7 +2076,15 @@ document.querySelector("#complaintType").addEventListener("change", syncComplain
 document.querySelector("#accountButton").addEventListener("click", () => openAccountDialog());
 document.querySelector("#openAccountFooter").addEventListener("click", () => openAccountDialog());
 document.querySelector("#accountMode").addEventListener("change", syncAccountMode);
+document.querySelector("#forgotPasswordLink").addEventListener("click", showForgotPassword);
+document.querySelector("#backToLogin").addEventListener("click", () => {
+  accountFlow = "account";
+  syncAccountMode();
+  document.querySelector("#accountEmail").focus();
+});
 document.querySelector("#accountForm").addEventListener("submit", submitAccount);
+document.querySelector("#forgotPasswordForm").addEventListener("submit", submitPasswordResetRequest);
+document.querySelector("#resetPasswordForm").addEventListener("submit", submitPasswordReset);
 document.querySelector("#logoutButton").addEventListener("click", logout);
 document.querySelector("#myOrdersButton").addEventListener("click", () => openMyOrders());
 document.querySelector("#openMyOrdersFooter").addEventListener("click", () => openMyOrders());
@@ -2042,7 +2139,12 @@ syncAccountMode();
   }
 })();
 try {
-  if (localStorage.getItem("maltashop-welcome-dismissed") !== "true") {
+  if (pendingResetToken) {
+    accountFlow = "reset";
+    syncAccountMode();
+    document.querySelector("#accountDialog").showModal();
+    document.querySelector("#newPassword").focus();
+  } else if (localStorage.getItem("maltashop-welcome-dismissed") !== "true") {
     welcomeDialog.showModal();
   }
 } catch (error) {
