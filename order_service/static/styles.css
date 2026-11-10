@@ -297,6 +297,45 @@ h1 em, h2 em { color: #76508a; font-weight: 600; }
 .payment-demo-note > span { color: var(--olive); font-size: 11px; line-height: 1.2; }
 .form-label { display: block; margin: 14px 0 7px; color: #493448; font-size: 10px; font-weight: 700; }
 .form-input { width: 100%; min-height: 45px; padding: 0 12px; border: 1px solid #ded2dc; border-radius: 3px; background: #fffdfa; color: var(--ink); font-size: 11px; transition: border-color .2s ease, box-shadow .2s ease; }
+.track-input-wrap { position: relative; }
+.track-input-wrap .form-input {
+  min-height: 52px;
+  padding: 0 54px 0 14px;
+  border: 1px solid #dcd0df;
+  border-radius: 14px;
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 10px 24px rgba(43,24,58,.06);
+  font-size: 14px;
+  letter-spacing: .08em;
+}
+.track-input-wrap .form-input::placeholder {
+  color: #8b7d8d;
+  letter-spacing: normal;
+  font-size: 11px;
+}
+.track-scan-button {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #51336a, #241833);
+  box-shadow: 0 8px 18px rgba(36,24,51,.2);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+.track-scan-button:hover {
+  transform: translateY(-50%) scale(1.03);
+}
+.track-scan-button svg {
+  width: 17px;
+  height: 17px;
+  fill: #fff;
+}
 .complaint-message { min-height: 120px; padding: 12px; resize: vertical; line-height: 1.7; }
 .complaint-success { margin: 13px 0 0; color: #355d3d; font-size: 10px; line-height: 1.6; }
 .my-order-cancel { margin-top: 12px; }
@@ -340,6 +379,14 @@ h1 em, h2 em { color: #76508a; font-weight: 600; }
 .confirmation-order code { color: #777a70; font-size: 9px; overflow-wrap: anywhere; }
 .confirmation-modal .text-button { margin-top: 16px; }
 .text-button { border: 0; background: transparent; color: #72756a; cursor: pointer; font-size: 10px; text-decoration: underline; text-underline-offset: 3px; }
+.password-input-wrap { position: relative; }
+.password-input-wrap .form-input { padding-right: 44px; }
+.password-toggle { width: 36px; height: 36px; position: absolute; top: 50%; right: 5px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #315b7c; cursor: pointer; transform: translateY(-50%); }
+.password-toggle:hover { background: rgba(60,32,83,.07); color: var(--olive-dark); }
+.password-toggle:focus-visible { outline: 2px solid var(--olive); outline-offset: 1px; }
+.password-toggle svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.password-toggle .icon-eye-off, .password-toggle.is-visible .icon-eye { display: none; }
+.password-toggle.is-visible .icon-eye-off { display: block; }
 .track-result { margin-top: 15px; padding: 13px; border: 1px solid var(--line); background: #f8f2f5; }
 .track-result h3 { margin: 0 0 11px; font-family: var(--font-display); font-size: 20px; font-weight: 500; }
 .track-result p { margin: 5px 0; color: #685b67; font-size: 10px; overflow-wrap: anywhere; }

@@ -407,9 +407,17 @@ function setDrawerOpen(open) {
   else document.querySelector("#openCart").focus();
 }
 
+function setPasswordVisibility(button, visible) {
+  const input = document.getElementById(button.dataset.passwordTarget);
+  input.type = visible ? "text" : "password";
+  button.classList.toggle("is-visible", visible);
+  button.setAttribute("aria-pressed", String(visible));
+  button.setAttribute("aria-label", visible ? "Hide password" : "Show password");
+}
 function openAccountDialog({ afterLogin = false } = {}) {
   checkoutAfterLogin = afterLogin;
   accountFlow = "account";
+  setPasswordVisibility(document.querySelector('[data-password-target="accountPassword"]'), false);
   document.querySelector("#accountError").hidden = true;
   document.querySelector("#accountMessage").hidden = true;
   document.querySelector("#accountEmail").value = authenticatedUser?.email || "";
@@ -2076,6 +2084,12 @@ document.querySelector("#complaintType").addEventListener("change", syncComplain
 document.querySelector("#accountButton").addEventListener("click", () => openAccountDialog());
 document.querySelector("#openAccountFooter").addEventListener("click", () => openAccountDialog());
 document.querySelector("#accountMode").addEventListener("change", syncAccountMode);
+document.querySelectorAll(".password-toggle").forEach((button) => {
+  button.addEventListener("click", () => {
+    const input = document.getElementById(button.dataset.passwordTarget);
+    setPasswordVisibility(button, input.type === "password");
+  });
+});
 document.querySelector("#forgotPasswordLink").addEventListener("click", showForgotPassword);
 document.querySelector("#backToLogin").addEventListener("click", () => {
   accountFlow = "account";
