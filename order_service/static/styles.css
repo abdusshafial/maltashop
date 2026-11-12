@@ -539,15 +539,21 @@ h1 em, h2 em { color: #76508a; font-weight: 600; }
 .product-review-form { margin-top: 14px; padding: 14px; border: 1px solid #e1d6e8; border-radius: 9px; background: linear-gradient(140deg, #f4edf6, #fffdfa); box-shadow: 0 8px 22px rgba(43,24,58,.07); }
 .review-comment { min-height: 84px; padding: 11px 13px; resize: vertical; }
 .review-sign-in { margin-top: 7px; }
-.account-dialog { overflow: hidden; border-radius: 16px; background: radial-gradient(ellipse at 92% 8%, rgba(216,194,228,.8), transparent 34%), radial-gradient(ellipse at 0% 100%, rgba(238,213,193,.63), transparent 40%), linear-gradient(145deg, #fffdfa, #f4edf6); box-shadow: 0 38px 110px rgba(24,12,34,.43), 0 12px 30px rgba(60,32,83,.2); perspective: 1100px; }
-.account-dialog::before { content: ""; width: 185px; height: 185px; position: absolute; top: -90px; right: -56px; border: 1px solid rgba(91,58,120,.2); border-radius: 50%; box-shadow: 0 0 0 17px rgba(255,255,255,.16), 0 0 0 35px rgba(91,58,120,.06); pointer-events: none; }
+.account-dialog { overflow: hidden; border-radius: 16px; background: radial-gradient(ellipse at 92% 8%, rgba(185,222,197,.82), transparent 36%), radial-gradient(ellipse at 0% 100%, rgba(205,229,207,.72), transparent 42%), linear-gradient(145deg, #fffefa, #edf7ef); box-shadow: 0 38px 110px rgba(18,48,31,.35), 0 12px 30px rgba(36,104,64,.18); perspective: 1100px; }
+.account-dialog::before { content: ""; width: 185px; height: 185px; position: absolute; top: -90px; right: -56px; border: 1px solid rgba(48,120,75,.22); border-radius: 50%; box-shadow: 0 0 0 17px rgba(255,255,255,.2), 0 0 0 35px rgba(48,120,75,.07); pointer-events: none; }
 .account-dialog .modal-content { position: relative; z-index: 1; transform: perspective(1000px) rotateY(-2deg) rotateX(1deg); transform-style: preserve-3d; }
-.account-dialog .modal-content > .eyebrow { text-shadow: 0 1px rgba(255,255,255,.8); }
+.account-dialog .modal-content > .eyebrow { color: #34774e; text-shadow: 0 1px rgba(255,255,255,.8); }
+.account-dialog h2 em { color: #34774e; }
+.account-dialog .form-label { color: #315e40; }
 .account-dialog form { transform: translateZ(12px); }
-.account-dialog .form-input { border-color: #ded2e1; border-radius: 7px; background: rgba(255,255,255,.84); box-shadow: 0 4px 12px rgba(43,24,58,.045), inset 0 1px rgba(255,255,255,.95); transition: transform .2s ease, box-shadow .2s ease; }
-.account-dialog .form-input:focus { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(43,24,58,.11); }
-.account-dialog .modal-submit { box-shadow: 0 11px 0 rgba(35,18,47,.12), 0 17px 26px rgba(43,24,58,.22); }
-.account-dialog .modal-submit:hover { transform: translateY(-3px); box-shadow: 0 13px 0 rgba(35,18,47,.1), 0 20px 30px rgba(43,24,58,.25); }
+.account-dialog .form-input { border-color: #b8d3c0; border-radius: 7px; background: rgba(255,255,255,.9); box-shadow: 0 4px 12px rgba(31,91,52,.055), inset 0 1px rgba(255,255,255,.95); transition: transform .2s ease, box-shadow .2s ease; }
+.account-dialog .form-input:focus { border-color: #43865a; transform: translateY(-1px); box-shadow: 0 0 0 3px rgba(67,134,90,.13), 0 8px 18px rgba(31,91,52,.1); }
+.account-dialog #accountSubmit { border-color: #276b43; background: linear-gradient(135deg, #3f895b, #23663f); box-shadow: 0 11px 0 rgba(27,78,47,.14), 0 17px 26px rgba(32,91,53,.2); }
+.account-dialog #accountSubmit:hover { background: linear-gradient(135deg, #34794e, #1e5937); transform: translateY(-3px); box-shadow: 0 13px 0 rgba(27,78,47,.1), 0 20px 30px rgba(32,91,53,.23); }
+.account-dialog #forgotPasswordLink { border-color: #a8cbb2; background: rgba(255,255,255,.82); color: #286b48; box-shadow: 0 5px 14px rgba(39,111,72,.09); }
+.account-dialog #forgotPasswordLink:hover { border-color: #43865a; background: #e8f4eb; color: #1f593a; }
+.account-dialog .password-toggle { color: #34774e; }
+#accountDialog .modal-content::before { background: linear-gradient(180deg, #80a987, #4c9364 55%, #b8d7bb); }
 @media (prefers-reduced-motion: reduce) {
   .account-dialog .modal-content, .account-dialog form { transform: none; }
 }
