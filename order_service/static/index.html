@@ -78,6 +78,27 @@
       <div><span class="benefit-icon" aria-hidden="true">♡</span><span>Order details saved for tracking</span></div>
     </section>
 
+    <section class="island-edit" aria-labelledby="islandEditTitle">
+      <div class="section-heading island-edit-heading">
+        <div><p class="eyebrow">A LITTLE LOCAL INSPIRATION</p><h2 id="islandEditTitle">Find your next <em>favourite.</em></h2></div>
+        <p>Thoughtful finds for everyday island life.</p>
+      </div>
+      <div class="collection-tiles">
+        <a class="collection-tile collection-popular" href="#shop" data-collection="popular">
+          <img src="https://images.unsplash.com/photo-1494438639946-1ebd1d20bf85?auto=format&amp;fit=crop&amp;w=900&amp;q=85" alt="A sunlit home interior with warm natural textures" loading="lazy">
+          <span class="collection-copy"><small>THE COMMUNITY EDIT</small><strong>Popular picks</strong><span>Everyday favourites, picked for island living <b aria-hidden="true">→</b></span></span>
+        </a>
+        <a class="collection-tile collection-new" href="#shop" data-collection="new">
+          <img src="https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&amp;fit=crop&amp;w=900&amp;q=85" alt="Useful everyday technology on a bright desk" loading="lazy">
+          <span class="collection-copy"><small>JUST LANDED</small><strong>New arrivals</strong><span>Fresh ideas for home, work and away <b aria-hidden="true">→</b></span></span>
+        </a>
+        <a class="collection-tile collection-island" href="#shop" data-collection="island">
+          <img src="https://images.unsplash.com/photo-1533104816931-20fa691ff6ca?auto=format&amp;fit=crop&amp;w=900&amp;q=85" alt="The bright blue Mediterranean sea around the islands" loading="lazy">
+          <span class="collection-copy"><small>MALTA &amp; GOZO</small><strong>Island favourites</strong><span>Good things for slower, sunnier days <b aria-hidden="true">→</b></span></span>
+        </a>
+      </div>
+    </section>
+
     <section class="delivery-banner" id="delivery" aria-labelledby="deliveryTitle">
       <div class="delivery-icon" aria-hidden="true">◎</div>
       <div>
@@ -112,6 +133,7 @@
           <label class="sort-control">Sort by
             <select id="sortSelect" aria-label="Sort products">
               <option value="featured">Featured</option>
+              <option value="popular">Most loved</option>
               <option value="price-low">Price: low to high</option>
               <option value="price-high">Price: high to low</option>
               <option value="name">Name</option>
@@ -122,7 +144,7 @@
             <button class="view-button is-active" id="gridView" type="button" aria-label="Grid view" aria-pressed="true"><span aria-hidden="true">▦</span></button>
             <button class="view-button" id="listView" type="button" aria-label="List view" aria-pressed="false"><span aria-hidden="true">☰</span></button>
           </div>
-          <button class="motion-toggle" id="motionToggle" type="button" aria-pressed="true"><span class="motion-toggle-dot" aria-hidden="true"></span><span>3D on</span></button>
+          <button class="motion-toggle" id="motionToggle" type="button" aria-label="Turn animations off" aria-pressed="true"><span class="motion-toggle-dot" aria-hidden="true"></span><span>Motion on</span></button>
         </div>
       </div>
       <div class="product-grid" id="productGrid" aria-live="polite"></div>
@@ -178,6 +200,13 @@
     </div>
   </footer>
 
+  <nav class="mobile-dock" aria-label="Quick navigation">
+    <a href="#shop"><span aria-hidden="true">⌂</span><small>Shop</small></a>
+    <button id="mobileSearch" type="button"><span aria-hidden="true">⌕</span><small>Search</small></button>
+    <button id="mobileAccount" type="button"><span aria-hidden="true">○</span><small>Account</small></button>
+    <button id="mobileCart" type="button" aria-label="Open shopping bag"><span class="mobile-bag-icon" aria-hidden="true">♧</span><small>Bag <b id="mobileCartCount">0</b></small></button>
+  </nav>
+
   <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
   <aside class="cart-drawer" id="cartDrawer" aria-labelledby="cartTitle" aria-hidden="true">
     <div class="drawer-header">
@@ -216,6 +245,13 @@
       <p class="eyebrow">ALMOST YOURS</p>
       <h2 id="checkoutTitle">A few details,<br><em>then it’s a good day.</em></h2>
       <p class="modal-intro">Add your contact and delivery details. The order and these details are saved to the shop’s SQLite database. Delivery is estimated in 2–5 working days (Monday–Friday).</p>
+      <nav class="checkout-progress" id="checkoutProgress" aria-label="Checkout progress">
+        <ol>
+          <li class="is-complete"><span>1</span><small>Bag</small></li>
+          <li class="is-current" aria-current="step"><span>2</span><small>Delivery</small></li>
+          <li><span>3</span><small>Confirm</small></li>
+        </ol>
+      </nav>
       <div class="checkout-review" id="checkoutReview"></div>
       <form id="checkoutForm">
         <fieldset class="payment-methods">
@@ -344,6 +380,7 @@
   </dialog>
 
   <dialog class="modal account-dialog" id="accountDialog" aria-labelledby="accountTitle">
+    <div class="account-water-drops" aria-hidden="true"><span class="water-drop water-drop-one"></span><span class="water-drop water-drop-two"></span><span class="water-drop water-drop-three"></span></div>
     <button class="icon-button modal-close" type="button" data-close-dialog aria-label="Close account form">×</button>
     <div class="modal-content">
       <p class="eyebrow">YOUR MALTA SHOP ACCOUNT</p>
