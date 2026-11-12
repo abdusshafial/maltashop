@@ -149,6 +149,10 @@ class OrderComplaintIn(MyOrdersIn):
             raise ValueError('Describe your complaint in at least 10 characters')
         return self
 
+class ComplaintUpdateIn(BaseModel):
+    status: str = Field(pattern='^(OPEN|IN_PROGRESS|RESOLVED)$')
+    staff_note: str = Field(default='', max_length=2000)
+
 class ProductReviewIn(BaseModel):
     rating: int = Field(ge=1, le=5)
     comment: str = Field(min_length=3, max_length=1000)
@@ -364,8 +368,17 @@ def initialize():
         db.execute(
             'CREATE TABLE IF NOT EXISTS complaints ('
             'id TEXT PRIMARY KEY, correlation_id TEXT NOT NULL, complaint_type TEXT NOT NULL, '
-            'product_sku TEXT, message TEXT NOT NULL, created_at TEXT NOT NULL)'
+            'product_sku TEXT, message TEXT NOT NULL, created_at TEXT NOT NULL, '
+            "status TEXT NOT NULL DEFAULT 'OPEN', staff_note TEXT NOT NULL DEFAULT '', "
+            'updated_at TEXT)'
         )
+        complaint_columns = {row[1] for row in db.execute('PRAGMA table_info(complaints)')}
+        if 'status' not in complaint_columns:
+            db.execute("ALTER TABLE complaints ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'")
+        if 'staff_note' not in complaint_columns:
+            db.execute("ALTER TABLE complaints ADD COLUMN staff_note TEXT NOT NULL DEFAULT ''")
+        if 'updated_at' not in complaint_columns:
+            db.execute('ALTER TABLE complaints ADD COLUMN updated_at TEXT')
         db.execute(
             'CREATE TABLE IF NOT EXISTS product_reviews ('
             'id TEXT PRIMARY KEY, user_id TEXT NOT NULL, product_sku TEXT NOT NULL, '
@@ -1385,6 +1398,40 @@ def create_order_complaint(body: OrderComplaintIn, user: dict = Depends(get_curr
         'complaint_type': body.complaint_type
     }))
     return {'complaint_id': complaint_id, 'status': 'RECEIVED', 'created_at': created_at}
+
+@app.get('/staff/complaints')
+def list_staff_complaints(_staff: dict = Depends(require_roles('admin', 'order_fulfillment_officer'))):
+    with connect() as db:
+        rows = db.execute(
+            'SELECT c.id,c.correlation_id,c.complaint_type,c.product_sku,c.message,c.created_at,'
+            'c.status,c.staff_note,c.updated_at,o.full_name,o.phone,o.email '
+            'FROM complaints c LEFT JOIN (SELECT correlation_id,MAX(full_name) AS full_name,'
+            'MAX(phone) AS phone,MAX(customer_id) AS email FROM orders GROUP BY correlation_id) o '
+            'ON o.correlation_id=c.correlation_id ORDER BY '
+            "CASE c.status WHEN 'OPEN' THEN 0 WHEN 'IN_PROGRESS' THEN 1 ELSE 2 END, c.created_at DESC"
+        ).fetchall()
+    return {'complaints': [
+        {'id': r[0], 'correlation_id': r[1], 'complaint_type': r[2], 'product_sku': r[3],
+         'message': r[4], 'created_at': r[5], 'status': r[6], 'staff_note': r[7],
+         'updated_at': r[8], 'customer_name': r[9], 'customer_phone': r[10], 'customer_email': r[11]}
+        for r in rows
+    ]}
+
+@app.patch('/staff/complaints/{complaint_id}', dependencies=[Depends(require_same_origin)])
+def update_staff_complaint(
+    complaint_id: str, body: ComplaintUpdateIn,
+    staff: dict = Depends(require_roles('admin', 'order_fulfillment_officer')),
+):
+    note = body.staff_note.strip()
+    with connect() as db:
+        exists = db.execute('SELECT 1 FROM complaints WHERE id=?', (complaint_id,)).fetchone()
+        if not exists:
+            raise HTTPException(404, 'Complaint not found')
+        db.execute(
+            'UPDATE complaints SET status=?,staff_note=?,updated_at=? WHERE id=?',
+            (body.status, note, datetime.now(timezone.utc).isoformat(), complaint_id)
+        )
+    return {'id': complaint_id, 'status': body.status, 'staff_note': note}
 
 @app.get('/orders/{order_id}')
 def get_order(order_id: str, user: dict = Depends(get_current_user)):

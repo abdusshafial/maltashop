@@ -729,6 +729,73 @@ function renderAdminOrders(orders) {
   }
 }
 
+function renderStaffComplaints(complaints) {
+  const container = document.querySelector("#staffComplaints");
+  container.replaceChildren();
+  if (!complaints.length) {
+    container.textContent = "No customer reports yet. New reports will appear here.";
+    return;
+  }
+  for (const complaint of complaints) {
+    const card = document.createElement("article");
+    card.className = "management-task-card complaint-card";
+    const title = document.createElement("h4");
+    const statusLabel = ({ OPEN: "Open", IN_PROGRESS: "In progress", RESOLVED: "Resolved" })[complaint.status] || complaint.status;
+    title.textContent = `${complaint.complaint_type === "product" ? "Product" : "Delivery"} report · ${statusLabel}`;
+    const details = document.createElement("p");
+    details.textContent = `${complaint.customer_name || complaint.customer_email || "Customer"} · ${complaint.customer_email || ""} · ${new Date(complaint.created_at).toLocaleString()}`;
+    const order = document.createElement("p");
+    order.textContent = `Order ${complaint.correlation_id}${complaint.product_sku ? ` · Item ${complaint.product_sku}` : ""}`;
+    const message = document.createElement("p");
+    message.className = "complaint-message-text";
+    message.textContent = complaint.message;
+    const controls = document.createElement("div");
+    controls.className = "fulfillment-controls";
+    const status = document.createElement("select");
+    status.className = "form-input";
+    status.setAttribute("aria-label", "Complaint status");
+    for (const [value, label] of [["OPEN", "Open"], ["IN_PROGRESS", "In progress"], ["RESOLVED", "Resolved"]]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      option.selected = complaint.status === value;
+      status.append(option);
+    }
+    const note = document.createElement("input");
+    note.className = "form-input";
+    note.maxLength = 2000;
+    note.value = complaint.staff_note || "";
+    note.placeholder = "Internal resolution note (optional)";
+    note.setAttribute("aria-label", "Internal resolution note");
+    const save = document.createElement("button");
+    save.className = "button button-outline";
+    save.type = "button";
+    save.textContent = "Save update";
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      try {
+        await sendJson(`/staff/complaints/${encodeURIComponent(complaint.id)}`, {
+          status: status.value, staff_note: note.value
+        }, "PATCH");
+        showToast("Customer report updated.");
+        await loadStaffComplaints();
+      } catch (error) {
+        showToast(error.message || "Could not update this report.");
+      } finally {
+        save.disabled = false;
+      }
+    });
+    controls.append(status, note, save);
+    card.append(title, details, order, message, controls);
+    container.append(card);
+  }
+}
+
+async function loadStaffComplaints() {
+  const result = await sendJson("/staff/complaints", null, "GET");
+  renderStaffComplaints(result.complaints);
+}
+
 function populateManagedProduct(product) {
   if (!product) return;
   document.querySelector("#manageProductCategory").value = product.category;
@@ -1049,6 +1116,8 @@ async function openManagement() {
   document.querySelector("#productManagementSection").hidden = !canManageProducts;
   document.querySelector("#fulfillmentSection").hidden =
     !isAdmin && role !== "order_fulfillment_officer";
+  document.querySelector("#complaintsSection").hidden =
+    !isAdmin && role !== "order_fulfillment_officer";
   document.querySelector("#financeSection").hidden = !isAdmin && role !== "finance_officer";
   document.querySelector("#manageProductMetadata").hidden = role === "inventory_manager";
   document.querySelectorAll("#manageProductMetadata input, #manageProductMetadata select").forEach((input) => {
@@ -1068,6 +1137,7 @@ async function openManagement() {
       document.querySelector("#manageProductStock").required = role === "admin";
     }
     if (role === "order_fulfillment_officer" || isAdmin) await loadFulfillmentOrders();
+    if (role === "order_fulfillment_officer" || isAdmin) await loadStaffComplaints();
     if (role === "finance_officer" || isAdmin) {
       renderFinanceSummary(await sendJson("/staff/finance/summary", null, "GET"));
     }

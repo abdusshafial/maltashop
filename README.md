@@ -111,6 +111,10 @@ any public HTTPS deployment.
 - Customers can cancel a pending order within 12 hours after a confirmation
   prompt. They can also submit product complaints (selecting an item from the
   order) or delivery-person complaints; complaint records are stored in SQLite.
+- Admins and order fulfillment officers can review those reports in the
+  management **Customer care inbox**, move them through Open, In progress, and
+  Resolved, and save an internal resolution note. Existing complaint records are
+  upgraded automatically when the service starts.
 - Local run: `data/orders.db` in the project.
 - Docker Compose: `/data/orders.db` on the persistent `orderdata` volume.
 - PythonAnywhere: `~/maltashop/data/orders.db`.

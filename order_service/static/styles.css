@@ -354,6 +354,9 @@ h1 em, h2 em { color: #76508a; font-weight: 600; }
 .management-task-card { padding: 15px; border: 1px solid var(--line); background: #fffdfa; }
 .management-task-card h4 { margin: 0 0 7px; color: var(--ink); font-size: 12px; }
 .management-task-card p { margin: 5px 0; color: var(--muted); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+.complaint-card { border-left-color: #b56a4a; }
+.complaint-card .complaint-message-text { margin: 10px 0; padding: 10px; border-radius: 8px; background: #f8f2f5; color: var(--ink); white-space: pre-wrap; }
+.complaint-card .fulfillment-controls .form-input { min-width: 140px; }
 .fulfillment-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 12px; }
 .fulfillment-controls .form-input { flex: 1 1 180px; }
 .finance-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
