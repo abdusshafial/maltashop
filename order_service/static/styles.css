@@ -1454,6 +1454,7 @@ body { background: #f7f5f8; }
 .footer-contact .footer-whatsapp { min-height: 42px; justify-self: stretch; padding: 0 13px; border-radius: 10px; background: #168b56; color: #fff; font-weight: 700; text-decoration: none; box-shadow: 0 5px 13px rgba(22,139,86,.18); }
 .footer-contact .footer-whatsapp:hover { background: #117548; color: #fff; text-decoration: none; }
 .footer-contact .footer-whatsapp svg { width: 20px; height: 20px; flex: 0 0 auto; stroke: currentColor; }
+.footer-contact .footer-facebook svg { width: 18px; height: 18px; flex: 0 0 auto; fill: #1877f2; stroke: #fff; stroke-width: .7; }
 .footer-contact svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .footer-links {
   display: flex;
