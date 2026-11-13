@@ -715,6 +715,7 @@ h1 em, h2 em { color: #76508a; font-weight: 600; }
 }
 .my-order-items li { display: flex; align-items: baseline; justify-content: space-between; gap: 9px; }
 .my-order-items li span { min-width: 0; }
+.my-order-rate { min-height: 30px; margin-left: auto; padding: 0 10px; font-size: 9px; white-space: nowrap; }
 .my-order-items li small {
   flex: 0 0 auto;
   padding: 3px 7px;

@@ -1477,6 +1477,20 @@ function renderMyOrders(orders) {
       const quantity = document.createElement("small");
       quantity.textContent = `× ${item.quantity}`;
       line.append(name, quantity);
+      if (order.status === "DELIVERED") {
+        const rateButton = document.createElement("button");
+        rateButton.className = "button button-outline my-order-rate";
+        rateButton.type = "button";
+        rateButton.textContent = "Rate product";
+        rateButton.setAttribute("aria-label", `Rate ${name.textContent}`);
+        rateButton.addEventListener("click", () => {
+          openProductDialog(item.sku);
+          window.setTimeout(() => {
+            document.querySelector("#productReviewsTitle").scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 100);
+        });
+        line.append(rateButton);
+      }
       items.append(line);
     });
 
