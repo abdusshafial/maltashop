@@ -30,6 +30,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .site-header { height: 83px; padding: 0 5.4%; display: grid; grid-template-columns: 1fr 1.15fr 1fr; align-items: center; background: rgba(250,247,242,.96); position: sticky; top: 0; z-index: 20; border-bottom: 1px solid rgba(85,59,80,.11); box-shadow: 0 5px 22px rgba(48,35,46,.035); backdrop-filter: blur(14px); }
 .wordmark { display: inline-flex; width: fit-content; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; letter-spacing: .13em; }
 .wordmark-light { color: #8a7895; font-weight: 500; }
+.wordmark-logo { width: 205px; height: auto; display: block; }
+.footer-wordmark .wordmark-logo { width: 215px; }
 .wordmark-icon { font-family: var(--font-display); font-size: 35px; letter-spacing: -.08em; line-height: .8; }
 .wordmark-icon span { color: var(--orange); }
 .main-nav { display: flex; justify-content: center; gap: clamp(18px, 3vw, 43px); }

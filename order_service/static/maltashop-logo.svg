@@ -1,0 +1,9 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 110" role="img" aria-labelledby="title">
+  <title id="title">MaltaShop</title>
+  <text x="4" y="91" fill="#211329" font-family="Georgia, 'Times New Roman', serif" font-size="105" font-weight="700" letter-spacing="-8">m</text>
+  <circle cx="101" cy="87" r="7" fill="#b98550"/>
+  <text x="139" y="69" font-family="Arial, Helvetica, sans-serif" font-size="35" font-weight="700" letter-spacing="5">
+    <tspan fill="#211329">MALTA</tspan><tspan fill="#8a7895" font-weight="500">SHOP</tspan>
+  </text>
+  <path d="M143 86h354" fill="none" stroke="#b98550" stroke-width="2" stroke-linecap="round" opacity=".62"/>
+</svg>
